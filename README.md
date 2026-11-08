@@ -2,6 +2,8 @@
 
 Setup for **Avy's TV**, a TCL Google TV (G10, Android 12, 1.8 GB RAM).
 
+> **Want this on your own TV?** Follow the step-by-step guide in **[SETUP.md](SETUP.md)**.
+
 The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB including its services). This repo replaces it with **Avy TV Home**, a small ad-free launcher of about 36 KB with a glass look. **Once it's installed, everything works on the TV with the remote. The PC is only needed to install or update it.**
 
 ## Features
