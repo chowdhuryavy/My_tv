@@ -95,3 +95,11 @@ One-time setup (about 10 minutes, free):
 6. On the TV, select the **avatar → Sign in with Google (photo)**. On your phone, open **google.com/device**, enter the code shown on the TV, and allow access.
 
 To stop syncing, use **avatar → Stop Google photo sync**. To remove access completely, go to myaccount.google.com → Security → Third-party connections.
+
+## Accounts & Profiles without the PC (v3.6)
+
+Opening **⚙ → All settings**, the **Settings** tile, or **avatar → Accounts & Profiles** in Avy TV Home now switches Google's launcher on automatically, so Accounts & Profiles works. When you leave Settings, it switches the launcher off again and makes Avy your Home screen. To do this, Avy connects to the TV's own debugging service (`LocalAdb`).
+
+- **First time:** the TV asks **"Allow USB debugging?"** for Avy TV Home. Tick **Always allow** and press **Allow**.
+- **Trade-off:** once allowed, Avy TV Home holds full debugging access to the TV, the same as a connected PC. It only uses it to switch the launcher. To withdraw it, go to **Developer options → Revoke USB debugging authorisations**.
+- The TV's own **Settings button** on the remote opens Settings directly, so use ⚙ in Avy when you need Accounts & Profiles.

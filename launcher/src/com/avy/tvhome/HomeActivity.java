@@ -183,6 +183,8 @@ public class HomeActivity extends Activity {
         renderSubscriptions();
         refreshAvatar();
         syncGooglePhoto(false); // keeps the Google photo current (every few hours)
+        // safety net: if Google's launcher was left on (e.g. the watcher was interrupted), switch it off
+        if (prefs().getBoolean(KEY_GL_ON, false) && !settingsWatch) new Thread(() -> restoreHome(false)).start();
         handler.removeCallbacks(clockTick);
         handler.post(clockTick);
         startAmbient();
@@ -691,7 +693,7 @@ public class HomeActivity extends Activity {
                 nextTheme();
                 applyTheme();
             }},
-            {"⚙   All settings", new Intent(Settings.ACTION_SETTINGS)},
+            {"⚙   All settings", (Runnable) this::openSettingsWithAccounts},
         };
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -723,6 +725,79 @@ public class HomeActivity extends Activity {
         panel.addView(grid, glp);
         d.show();
         first.requestFocus();
+    }
+
+    // =================================================================== Settings with Accounts & Profiles
+
+    /*
+     * Settings > Accounts & Profiles is drawn by the Google TV launcher, which is disabled
+     * (ads). Using the TV's own debugging service (LocalAdb), we switch it on just while
+     * Settings is open, then off again as soon as you leave Settings, so Avy stays Home.
+     */
+    private static final String GOOGLE_LAUNCHER = "com.google.android.apps.tv.launcherx";
+    private static final String KEY_GL_ON = "google_launcher_on";
+    private volatile boolean settingsWatch;
+
+    private void openSettingsWithAccounts() {
+        if (!prefs().getBoolean("adb_explained", false)) {
+            prefs().edit().putBoolean("adb_explained", true).apply();
+            Toast.makeText(this, "First time only: on \"Allow USB debugging?\" tick Always allow, then Allow", Toast.LENGTH_LONG).show();
+        }
+        new Thread(() -> {
+            boolean on = false;
+            try {
+                LocalAdb.shell(this, "pm enable " + GOOGLE_LAUNCHER, 15_000);
+                prefs().edit().putBoolean(KEY_GL_ON, true).apply();
+                on = true;
+            } catch (Exception e) {
+                android.util.Log.w("AvyAdb", "could not enable Google launcher", e);
+                runOnUiThread(() -> Toast.makeText(this, "Accounts & Profiles needs debugging access (Allow on the TV)", Toast.LENGTH_LONG).show());
+            }
+            runOnUiThread(() -> safeStart(new Intent(Settings.ACTION_SETTINGS)));
+            if (on) watchSettingsThenRestore();
+        }).start();
+    }
+
+    /** While Settings (or an account screen it opens) is in front, keep Google's launcher on; then switch back. */
+    private void watchSettingsThenRestore() {
+        settingsWatch = true;
+        long until = System.currentTimeMillis() + 45 * 60 * 1000L;
+        int away = 0;
+        try {
+            Thread.sleep(2500);
+            while (settingsWatch && System.currentTimeMillis() < until) {
+                String focus = LocalAdb.shell(this, "dumpsys window | grep -m1 mCurrentFocus", 8_000);
+                boolean inSettings = focus.contains("com.android.tv.settings") || focus.contains("com.google.android.gms")
+                        || focus.contains("permissioncontroller") || focus.contains("com.android.vending")
+                        || focus.contains("=null");
+                away = inSettings ? 0 : away + 1;
+                if (away >= 1) {
+                    restoreHome(focus.contains(GOOGLE_LAUNCHER));
+                    return;
+                }
+                Thread.sleep(1500);
+            }
+            restoreHome(false);
+        } catch (Exception e) {
+            android.util.Log.w("AvyAdb", "settings watch stopped", e);
+        } finally {
+            settingsWatch = false;
+        }
+    }
+
+    /** Google launcher off again, Avy is Home; if Google's home screen popped up, bring Avy back. */
+    private void restoreHome(boolean bringAvyBack) {
+        try {
+            LocalAdb.shell(this, "pm disable-user --user 0 " + GOOGLE_LAUNCHER
+                    + " ; cmd package set-home-activity " + getPackageName() + "/.HomeActivity", 15_000);
+            prefs().edit().putBoolean(KEY_GL_ON, false).apply();
+            if (bringAvyBack) {
+                Intent i = new Intent(this, HomeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            }
+        } catch (Exception e) {
+            android.util.Log.w("AvyAdb", "restore failed", e);
+        }
     }
 
     // =================================================================== app search
@@ -1254,7 +1329,7 @@ public class HomeActivity extends Activity {
         }
         if (first == null) first = gBtn;
         menuButton(list, "✎   " + (name.isEmpty() ? "Set your name" : "Change name"), this::editName, d);
-        menuButton(list, "⚙   Accounts (Settings)", () -> safeStart(new Intent(Settings.ACTION_SETTINGS)), d);
+        menuButton(list, "⚙   Accounts & Profiles", this::openSettingsWithAccounts, d);
         menuButton(list, "✕   Close", null, d);
         TextView tip = ui.text(signedIn ? "Your Google photo updates automatically every few hours."
                 : "Signing in lets this home screen read only your Google name and photo.", 11, Ui.MUTED, Ui.REGULAR);
@@ -1362,7 +1437,9 @@ public class HomeActivity extends Activity {
         }
 
         LinearLayout sys = addRow("System");
-        sys.addView(actionTile("⚙", "Settings", new Intent(Settings.ACTION_SETTINGS)));
+        View settingsTile = actionTile("⚙", "Settings", null);
+        cardOf(settingsTile).setOnClickListener(v -> openSettingsWithAccounts());
+        sys.addView(settingsTile);
         sys.addView(actionTile("📶", "Wi-Fi", new Intent(Settings.ACTION_WIFI_SETTINGS)));
         sys.addView(actionTile("▦", "All apps", new Intent(Settings.ACTION_APPLICATION_SETTINGS)));
         View themeBox = actionTile("🎨", "Theme", null);
