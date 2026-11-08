@@ -230,8 +230,28 @@ public class HomeActivity extends Activity {
         }
     }
 
+    /**
+     * App buttons (Netflix, YouTube, Prime, Web, Settings…) handled right here while the
+     * home screen is showing. No accessibility helper needed, so held buttons (volume,
+     * arrows) keep repeating normally everywhere.
+     */
+    private boolean handleAppButton(KeyEvent e) {
+        int code = e.getKeyCode();
+        if (KeyService.isReserved(code) || code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN
+                || code == KeyEvent.KEYCODE_MENU) return false;
+        String target = KeyService.targetFor(this, code);
+        if (target == null) return false;
+        if (e.getAction() == KeyEvent.ACTION_UP) {
+            android.util.Log.i(KeyService.TAG, "home screen: button " + code + " -> " + target);
+            if (KeyService.QUICK.equals(target)) showQuickSettings();
+            else if (!KeyService.HOME.equals(target)) KeyService.openApp(this, target);
+        }
+        return true; // swallow down + up
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (moving == null && !arranging && handleAppButton(e)) return true;
         if (moving == null && arranging && e.getAction() == KeyEvent.ACTION_DOWN
                 && (e.getKeyCode() == KeyEvent.KEYCODE_BACK || e.getKeyCode() == KeyEvent.KEYCODE_ESCAPE)) {
             stopArrange();
@@ -723,9 +743,10 @@ public class HomeActivity extends Activity {
         LinearLayout panel = panel();
         panel.addView(ui.text("Remote buttons", 24, Ui.WHITE, Ui.MEDIUM));
         boolean on = keyServiceOn();
-        TextView status = ui.text(on ? "●  Helper running. Choose which app each remote button opens."
-                : "●  Helper NOT running, so app buttons won't work.\nIn Accessibility, switch “Avy TV Home remote buttons” OFF and then ON again.",
-                13, on ? Ui.GREEN : Ui.AMBER, Ui.REGULAR);
+        TextView status = ui.text(on
+                ? "●  Buttons work everywhere (helper on). Held buttons like volume won't repeat."
+                : "●  Buttons work from this home screen. Holding volume / arrows works normally.",
+                13, Ui.GREEN, Ui.REGULAR);
         status.setLineSpacing(ui.px(3), 1f);
         addWithTop(panel, status, 6);
         final Dialog d = dialog(panel);
@@ -735,12 +756,7 @@ public class HomeActivity extends Activity {
         llp.topMargin = ui.px(12);
         panel.addView(list, llp);
 
-        View first;
-        if (!on) {
-            first = menuButton(list, "⚙   Open Accessibility settings", () -> safeStart(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)), d);
-        } else {
-            first = menuButton(list, "＋   Set up a button", this::learnButton, d);
-        }
+        View first = menuButton(list, "＋   Set up a button", this::learnButton, d);
         // default-mapped buttons the user switched off, so they can be switched back on
         for (int i = 0; i < KeyService.DEFAULT_CODES.length; i++) {
             final String code = String.valueOf(KeyService.DEFAULT_CODES[i][0]);
@@ -803,6 +819,15 @@ public class HomeActivity extends Activity {
             runOnUiThread(() -> { d.dismiss(); chooseAppFor(code, name); });
             return true;
         };
+        // Without the helper the press arrives here, at this dialog.
+        d.setOnKeyListener((di, code, ev) -> {
+            if (ev.getAction() != KeyEvent.ACTION_DOWN || ev.getRepeatCount() != 0) return false;
+            if (KeyService.isReserved(code) || code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN) return false;
+            KeyService.learner = null;
+            d.dismiss();
+            chooseAppFor(code, KeyEvent.keyCodeToString(code));
+            return true;
+        });
         d.show();
         cancel.requestFocus();
     }

@@ -138,26 +138,39 @@ public class KeyService extends AccessibilityService {
         return null;
     }
 
-    private String mapped(int code) {
-        SharedPreferences p = getSharedPreferences("tvhome", MODE_PRIVATE);
+    private String mapped(int code) { return targetFor(this, code); }
+
+    /** What a remote button opens: the user's choice, else the built-in default; null if nothing. Shared with HomeActivity. */
+    static String targetFor(android.content.Context c, int code) {
+        SharedPreferences p = c.getSharedPreferences("tvhome", MODE_PRIVATE);
         try {
             JSONObject m = new JSONObject(p.getString(KEY_BUTTONS, "{}"));
             String key = String.valueOf(code);
             if (m.has(key)) {
                 String pkg = m.optString(key, "");
-                return !pkg.isEmpty() && installed(pkg) ? pkg : null; // "" = user turned it off
+                return !pkg.isEmpty() && installed(c, pkg) ? pkg : null; // "" = user turned it off
             }
         } catch (Exception ignored) { }
         String def = defaultFor(code);
-        return def != null && installed(def) ? def : null;
+        return def != null && installed(c, def) ? def : null;
     }
 
-    private boolean installed(String pkg) {
+    static boolean installed(android.content.Context c, String pkg) {
         if (pkg.startsWith("avy:")) return true;
-        PackageManager pm = getPackageManager();
+        PackageManager pm = c.getPackageManager();
         if (pm.getLeanbackLaunchIntentForPackage(pkg) != null || pm.getLaunchIntentForPackage(pkg) != null) return true;
         Log.w(TAG, "  app not found: " + pkg);
         return false;
+    }
+
+    /** Opens an app by package (TV launcher entry first). */
+    static void openApp(android.content.Context c, String pkg) {
+        PackageManager pm = c.getPackageManager();
+        Intent i = pm.getLeanbackLaunchIntentForPackage(pkg);
+        if (i == null) i = pm.getLaunchIntentForPackage(pkg);
+        if (i == null) return;
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        try { c.startActivity(i); } catch (Exception ex) { Log.w(TAG, "launch failed " + pkg, ex); }
     }
 
     /** One-time cleanup: v2.2/2.3 let a single click switch buttons off by accident. */
@@ -200,12 +213,7 @@ public class KeyService extends AccessibilityService {
             try { startActivity(home); } catch (Exception ex) { Log.w(TAG, "open home failed", ex); }
             return;
         }
-        PackageManager pm = getPackageManager();
-        Intent i = pm.getLeanbackLaunchIntentForPackage(pkg);
-        if (i == null) i = pm.getLaunchIntentForPackage(pkg);
-        if (i == null) return;
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        try { startActivity(i); } catch (Exception ex) { Log.w(TAG, "launch failed " + pkg, ex); }
+        openApp(this, pkg);
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) { }
