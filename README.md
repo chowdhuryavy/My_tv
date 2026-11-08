@@ -15,7 +15,15 @@ The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB
   - The badge shows the days left: green, amber (14 days or less) or red (3 days or less, or expired).
   - Select a subscription to edit or delete it.
 - **Apps in rows:** Streaming, Sports & Live, Tools, More apps and System.
-- **Reordering:** hold **OK** on an app (or press **Menu**), choose **Move left / right**, use ◀ ▶ to move it, then press **OK**. *Move to start* and *Move to end* are also in that menu, and the order is remembered.
+- **Reordering apps**, and the order is remembered. There are two ways:
+  - **One app:** hold **OK** on it (or press **Menu**), choose **Move left / right**, use ◀ ▶ to slide it (it wiggles while the other apps move aside), then press **OK** to drop it. *Move to start* and *Move to end* are in the same menu.
+  - **Several apps:** in the System row, open **⇄ Arrange apps**. For each app, press **OK** to pick it up, ◀ ▶ to move it and **OK** to drop it, then press **Back** when you're done.
+- **Animations:** a slowly drifting background, a floating weather icon, staggered slide-in on open, a bouncy focus zoom, pop-in dialogs, theme cross-fade and pulsing badges for subscriptions that are due soon. They pause while another app is open.
+- **⚙ Quick settings** (top right): Wi-Fi, Bluetooth, Picture & display, Sound, Inputs (HDMI), Screen saver, Remote buttons, Change theme and All settings.
+- **Account avatar** (top right): choose your Google account on the TV, and the greeting uses your name. Android doesn't let other apps read your Google profile photo, so to show it run `scripts\set-avatar.ps1 C:\path\photo.jpg` once.
+- **Remote app buttons** (Netflix, YouTube, Prime Video and others): Google TV normally handles these inside the stock launcher, which is disabled here. Avy TV Home includes a small accessibility service that handles them instead. It only sees button presses, never screen content. To set it up:
+  1. Turn it on once in **Settings → Accessibility → Avy TV Home remote buttons**. The shortcut is in ⚙ → Remote buttons.
+  2. In **⚙ → Remote buttons → Set up a button**, press the remote button, then pick the app it should open.
 
 ### Remote tips
 
@@ -47,6 +55,7 @@ scripts\snapshot.ps1                 # save current TV setup into tv-snapshot\
 launcher\build.ps1                   # build launcher\out\avy-tv-home.apk
 scripts\install-launcher.ps1         # install/update it and make it the home screen
 scripts\set-config.ps1               # optional: force a weather city from config\config.json
+scripts\set-avatar.ps1 photo.jpg     # optional: your picture in the top-right avatar
 scripts\restore-stock-launcher.ps1   # go back to the original Google TV home
 ```
 

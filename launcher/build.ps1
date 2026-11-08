@@ -33,7 +33,13 @@ $classes = @(Get-ChildItem "$out\classes" -Recurse -Filter *.class | ForEach-Obj
 if ($LASTEXITCODE) { throw 'd8 failed' }
 
 # --- package manifest, add dex
-& "$bt\aapt2.exe" link -o "$out\unsigned.apk" -I $androidJar --manifest "$here\AndroidManifest.xml" --min-sdk-version 26 --target-sdk-version 31
+$resArgs = @()
+if (Test-Path "$here\res") {
+    & "$bt\aapt2.exe" compile --dir "$here\res" -o "$out\res.zip"
+    if ($LASTEXITCODE) { throw 'aapt2 compile failed' }
+    $resArgs = @("$out\res.zip")
+}
+& "$bt\aapt2.exe" link -o "$out\unsigned.apk" -I $androidJar --manifest "$here\AndroidManifest.xml" --min-sdk-version 26 --target-sdk-version 31 @resArgs
 if ($LASTEXITCODE) { throw 'aapt2 link failed' }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open("$out\unsigned.apk", 'Update')

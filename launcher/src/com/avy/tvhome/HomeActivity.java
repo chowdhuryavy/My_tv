@@ -1,6 +1,21 @@
 package com.avy.tvhome;
 
+import android.accounts.AccountManager;
+import android.animation.Animator;
+import android.animation.AnimatorSet;
+import android.animation.LayoutTransition;
+import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
+import android.graphics.drawable.TransitionDrawable;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.OvershootInterpolator;
+import java.io.File;
 import android.app.Dialog;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
@@ -87,6 +102,22 @@ public class HomeActivity extends Activity {
     private String focusPkg;        // last focused app, restored after refresh
     private final List<ResolveInfo> streamingApps = new ArrayList<>();
 
+    // header pieces animated on entrance
+    private View headerView, weatherCard, subsCard;
+    // account avatar (top right)
+    private static final int REQ_ACCOUNT = 42;
+    private static final String KEY_ACCOUNT = "account";
+    private FrameLayout avatar;
+    private View gearButton;
+    private TextView avatarText;
+    private ImageView avatarImg;
+    // arrange mode: OK picks up an app instead of opening it
+    private boolean arranging;
+    // running animations (stopped while another app is in front)
+    private AnimatorSet drift;
+    private ObjectAnimator iconFloat, wiggle;
+    private final List<Animator> pulses = new ArrayList<>();
+
     private long lastWeatherAt = 0;
     private double lat = Double.NaN, lon = Double.NaN;
     private String place = "";
@@ -98,7 +129,9 @@ public class HomeActivity extends Activity {
             ampmView.setText(new SimpleDateFormat("a", Locale.getDefault()).format(now));
             dateView.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
             int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-            greeting.setText(h < 5 ? "Good night" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : h < 22 ? "Good evening" : "Good night");
+            String hello = h < 5 ? "Good night" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : h < 22 ? "Good evening" : "Good night";
+            String who = displayName();
+            greeting.setText(who.isEmpty() ? hello : hello + ", " + who);
             if (System.currentTimeMillis() - lastWeatherAt > WEATHER_EVERY_MS) loadWeather();
             handler.postDelayed(this, 15_000);
         }
@@ -130,8 +163,11 @@ public class HomeActivity extends Activity {
         super.onResume();
         renderApps();
         renderSubscriptions();
+        refreshAvatar();
         handler.removeCallbacks(clockTick);
         handler.post(clockTick);
+        startAmbient();
+        playEntrance();
     }
 
     @Override
@@ -139,13 +175,30 @@ public class HomeActivity extends Activity {
         super.onPause();
         handler.removeCallbacks(clockTick);
         if (moving != null) endMove();
+        if (arranging) stopArrange();
+        stopAmbient();
     }
 
     @Override
     public void onBackPressed() { /* home screen: nothing to go back to */ }
 
     @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == REQ_ACCOUNT && res == RESULT_OK && data != null) {
+            String name = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
+            if (name != null) prefs().edit().putString(KEY_ACCOUNT, name).apply();
+            refreshAvatar();
+        }
+    }
+
+    @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (moving == null && arranging && e.getAction() == KeyEvent.ACTION_DOWN
+                && (e.getKeyCode() == KeyEvent.KEYCODE_BACK || e.getKeyCode() == KeyEvent.KEYCODE_ESCAPE)) {
+            stopArrange();
+            return true;
+        }
         if (moving == null) return super.dispatchKeyEvent(e);
         if (e.getAction() == KeyEvent.ACTION_DOWN) {
             switch (e.getKeyCode()) {
@@ -264,7 +317,62 @@ public class HomeActivity extends Activity {
         addWithTop(wCol, forecastView, 4);
         weather.addView(wCol);
         header.addView(weather);
+        weatherCard = weather;
+
+        // ---- account avatar, top right (like Google TV)
+        avatar = new FrameLayout(this);
+        avatar.setFocusable(true);
+        avatar.setClickable(true);
+        avatar.setId(View.generateViewId());
+        GradientDrawable avBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{0xFF7B5CFF, 0xFF00C6FF});
+        avBg.setShape(GradientDrawable.OVAL);
+        avatar.setBackground(avBg);
+        avatar.setClipToOutline(true);
+        StateListDrawable ring = new StateListDrawable();
+        GradientDrawable on = new GradientDrawable(); on.setShape(GradientDrawable.OVAL); on.setStroke(ui.px(3), Ui.WHITE);
+        GradientDrawable off = new GradientDrawable(); off.setShape(GradientDrawable.OVAL); off.setStroke(ui.px(2), 0x66FFFFFF);
+        ring.addState(new int[]{android.R.attr.state_focused}, on);
+        ring.addState(new int[]{}, off);
+        avatar.setForeground(ring);
+        avatarImg = new ImageView(this);
+        avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        avatar.addView(avatarImg, new FrameLayout.LayoutParams(-1, -1));
+        avatarText = ui.text("", 26, Ui.WHITE, Ui.MEDIUM);
+        avatarText.setGravity(Gravity.CENTER);
+        avatar.addView(avatarText, new FrameLayout.LayoutParams(-1, -1));
+        avatar.setOnClickListener(v -> showAccountMenu());
+        avatar.setOnFocusChangeListener((v, has) -> v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
+                .setInterpolator(new OvershootInterpolator(2f)).setDuration(220).start());
+        // ---- quick settings gear (left of the avatar)
+        TextView gear = ui.text("⚙", 28, Ui.WHITE, Ui.REGULAR);
+        gear.setGravity(Gravity.CENTER);
+        gear.setFocusable(true);
+        gear.setClickable(true);
+        gear.setId(View.generateViewId());
+        StateListDrawable gbg = new StateListDrawable();
+        GradientDrawable gOn = new GradientDrawable(); gOn.setShape(GradientDrawable.OVAL); gOn.setColor(0x4DFFFFFF); gOn.setStroke(ui.px(3), Ui.WHITE);
+        GradientDrawable gOff = new GradientDrawable(); gOff.setShape(GradientDrawable.OVAL); gOff.setColor(0x26FFFFFF); gOff.setStroke(ui.px(1), 0x40FFFFFF);
+        gbg.addState(new int[]{android.R.attr.state_focused}, gOn);
+        gbg.addState(new int[]{}, gOff);
+        gear.setBackground(gbg);
+        gear.setOnClickListener(v -> showQuickSettings());
+        gear.setOnFocusChangeListener((v, has) -> v.animate().rotation(has ? 60f : 0f).scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
+                .setInterpolator(new OvershootInterpolator(2f)).setDuration(300).start());
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(ui.px(56), ui.px(56));
+        glp.leftMargin = ui.px(22);
+        glp.gravity = Gravity.TOP;
+        glp.topMargin = ui.px(8);
+        header.addView(gear, glp);
+        gearButton = gear;
+
+        LinearLayout.LayoutParams avlp = new LinearLayout.LayoutParams(ui.px(64), ui.px(64));
+        avlp.leftMargin = ui.px(22);
+        avlp.gravity = Gravity.TOP;
+        avlp.topMargin = ui.px(4);
+        header.addView(avatar, avlp);
+
         page.addView(header);
+        headerView = timeCol;
 
         // ---- body
         LinearLayout body = new LinearLayout(this);
@@ -320,6 +428,10 @@ public class HomeActivity extends Activity {
         sclp.leftMargin = ui.px(26);
         sclp.topMargin = ui.px(34);
         body.addView(subsCard, sclp);
+        this.subsCard = subsCard;
+        // Up from + Add -> avatar; Down from avatar -> + Add
+        add.setNextFocusUpId(avatar.getId());
+        avatar.setNextFocusDownId(addButtonId);
 
         // ---- hint bar (move mode)
         hintBar = ui.text("", 15, Ui.WHITE, Ui.MEDIUM);
@@ -341,8 +453,346 @@ public class HomeActivity extends Activity {
     private void applyTheme() {
         int t = prefs().getInt(KEY_THEME, 0);
         Bitmap b = Ui.backdrop(t);
-        backdrop.setImageBitmap(b);
+        Drawable old = backdrop.getDrawable();
+        if (old instanceof TransitionDrawable) old = ((TransitionDrawable) old).getDrawable(1);
+        if (old == null) {
+            backdrop.setImageBitmap(b);
+        } else { // cross-fade between themes
+            TransitionDrawable td = new TransitionDrawable(new Drawable[]{old, new BitmapDrawable(getResources(), b)});
+            td.setCrossFadeEnabled(true);
+            backdrop.setImageDrawable(td);
+            td.startTransition(700);
+        }
         updateThemeLabel();
+    }
+
+    // =================================================================== animations
+
+    /** Slow drifting backdrop + floating weather icon. Stopped while another app is open. */
+    private void startAmbient() {
+        stopAmbient();
+        ObjectAnimator sx = ObjectAnimator.ofFloat(backdrop, View.SCALE_X, 1.12f, 1.22f);
+        ObjectAnimator sy = ObjectAnimator.ofFloat(backdrop, View.SCALE_Y, 1.12f, 1.22f);
+        ObjectAnimator tx = ObjectAnimator.ofFloat(backdrop, View.TRANSLATION_X, -ui.px(40), ui.px(40));
+        ObjectAnimator ty = ObjectAnimator.ofFloat(backdrop, View.TRANSLATION_Y, ui.px(16), -ui.px(16));
+        for (ObjectAnimator a : new ObjectAnimator[]{sx, sy, tx, ty}) {
+            a.setRepeatCount(ValueAnimator.INFINITE);
+            a.setRepeatMode(ValueAnimator.REVERSE);
+        }
+        tx.setDuration(26_000);
+        ty.setDuration(19_000);
+        sx.setDuration(33_000);
+        sy.setDuration(33_000);
+        drift = new AnimatorSet();
+        drift.playTogether(sx, sy, tx, ty);
+        drift.setInterpolator(new AccelerateDecelerateInterpolator());
+        drift.start();
+
+        iconFloat = ObjectAnimator.ofFloat(weatherIcon, View.TRANSLATION_Y, -ui.px(4), ui.px(4));
+        iconFloat.setDuration(2600);
+        iconFloat.setRepeatCount(ValueAnimator.INFINITE);
+        iconFloat.setRepeatMode(ValueAnimator.REVERSE);
+        iconFloat.setInterpolator(new AccelerateDecelerateInterpolator());
+        iconFloat.start();
+    }
+
+    private void stopAmbient() {
+        if (drift != null) drift.cancel();
+        if (iconFloat != null) iconFloat.cancel();
+        for (Animator a : pulses) a.cancel();
+    }
+
+    /** Header, cards and app rows glide in, rows one after another. */
+    private void playEntrance() {
+        DecelerateInterpolator dec = new DecelerateInterpolator(2f);
+        slideIn(headerView, -ui.px(24), 0, 0, dec);
+        slideIn(weatherCard, ui.px(40), 0, 80, dec);
+        slideIn(gearButton, ui.px(40), 0, 110, dec);
+        slideIn(avatar, ui.px(40), 0, 140, dec);
+        slideIn(subsCard, ui.px(40), 0, 200, dec);
+        int delay = 120;
+        for (int i = 0; i < rowsBox.getChildCount(); i++) {
+            View row = rowsBox.getChildAt(i);
+            row.setAlpha(0f);
+            row.setTranslationY(ui.px(28));
+            row.animate().alpha(1f).translationY(0).setStartDelay(delay).setDuration(420).setInterpolator(dec).start();
+            delay += 55;
+        }
+    }
+
+    private void slideIn(View v, float fromX, float fromY, long delay, DecelerateInterpolator in) {
+        if (v == null) return;
+        v.setAlpha(0f);
+        v.setTranslationX(fromX);
+        v.setTranslationY(fromY);
+        v.animate().alpha(1f).translationX(0).translationY(0).setStartDelay(delay).setDuration(480).setInterpolator(in).start();
+    }
+
+    /** Gentle pulse for subscriptions that are due very soon. */
+    private void pulse(View v) {
+        ObjectAnimator a = ObjectAnimator.ofFloat(v, View.ALPHA, 1f, 0.45f);
+        a.setDuration(850);
+        a.setRepeatCount(ValueAnimator.INFINITE);
+        a.setRepeatMode(ValueAnimator.REVERSE);
+        a.start();
+        pulses.add(a);
+    }
+
+    /** Dialog panel pops in: slight zoom + fade. */
+    private void popIn(View panel) {
+        panel.setAlpha(0f);
+        panel.setScaleX(0.9f);
+        panel.setScaleY(0.9f);
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(new OvershootInterpolator(1.2f)).start();
+    }
+
+    // =================================================================== quick settings
+
+    private void showQuickSettings() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Quick settings", 24, Ui.WHITE, Ui.MEDIUM));
+        final Dialog d = dialog(panel);
+        Object[][] items = {
+            {"📶   Wi-Fi", new Intent(Settings.ACTION_WIFI_SETTINGS)},
+            {"ᛒ   Bluetooth", new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)},
+            {"🖥   Picture & display", new Intent(Settings.ACTION_DISPLAY_SETTINGS)},
+            {"🔊   Sound", new Intent(Settings.ACTION_SOUND_SETTINGS)},
+            {"⎆   Inputs (HDMI)", new Intent("com.tcl.suspension.action.main").setPackage("com.tcl.suspension").putExtra("openInput", "true")},
+            {"🌙   Screen saver", new Intent(Settings.ACTION_DREAM_SETTINGS)},
+            {"🎮   Remote buttons", (Runnable) this::showRemoteButtons},
+            {"🎨   Change theme", (Runnable) () -> {
+                prefs().edit().putInt(KEY_THEME, prefs().getInt(KEY_THEME, 0) + 1).apply();
+                applyTheme();
+            }},
+            {"⚙   All settings", new Intent(Settings.ACTION_SETTINGS)},
+        };
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout row = null;
+        View first = null;
+        for (int i = 0; i < items.length; i++) {
+            if (i % 3 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-2, -2);
+                rlp.topMargin = ui.px(10);
+                grid.addView(row, rlp);
+            }
+            final Object action = items[i][1];
+            TextView b = ui.button((String) items[i][0], false);
+            b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            b.setPadding(ui.px(18), ui.px(14), ui.px(18), ui.px(14));
+            b.setOnClickListener(v -> {
+                d.dismiss();
+                if (action instanceof Intent) safeStart((Intent) action); else ((Runnable) action).run();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ui.px(230), -2);
+            lp.rightMargin = ui.px(10);
+            row.addView(b, lp);
+            if (first == null) first = b;
+        }
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-2, -2);
+        glp.topMargin = ui.px(8);
+        panel.addView(grid, glp);
+        d.show();
+        first.requestFocus();
+    }
+
+    // =================================================================== remote buttons
+
+    private boolean keyServiceOn() {
+        String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        return s != null && s.contains(getPackageName() + "/");
+    }
+
+    private JSONObject buttonMap() { return json(KeyService.KEY_BUTTONS); }
+
+    private String appLabel(String pkg) {
+        try { return String.valueOf(getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0))); }
+        catch (Exception e) { return pkg; }
+    }
+
+    private void showRemoteButtons() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Remote buttons", 24, Ui.WHITE, Ui.MEDIUM));
+        boolean on = keyServiceOn();
+        addWithTop(panel, ui.text(on ? "Choose which app each remote button opens."
+                : "The button helper is off. Turn on “Avy TV Home remote buttons” in Accessibility.", 13, Ui.SOFT, Ui.REGULAR), 6);
+        final Dialog d = dialog(panel);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(460), -2);
+        llp.topMargin = ui.px(12);
+        panel.addView(list, llp);
+
+        View first;
+        if (!on) {
+            first = menuButton(list, "⚙   Open Accessibility settings", () -> safeStart(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)), d);
+        } else {
+            first = menuButton(list, "＋   Set up a button", this::learnButton, d);
+        }
+        JSONObject map = buttonMap();
+        for (Iterator<String> it = map.keys(); it.hasNext(); ) {
+            final String code = it.next();
+            String name = KeyEvent.keyCodeToString(Integer.parseInt(code)).replace("KEYCODE_", "").replace('_', ' ');
+            menuButton(list, "✕   " + name + "  →  " + appLabel(map.optString(code)) + "   (remove)", () -> {
+                JSONObject m = buttonMap();
+                m.remove(code);
+                putJson(KeyService.KEY_BUTTONS, m);
+                showRemoteButtons();
+            }, d);
+        }
+        menuButton(list, "Close", null, d);
+        d.show();
+        first.requestFocus();
+    }
+
+    private void learnButton() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Press a remote button", 24, Ui.WHITE, Ui.MEDIUM));
+        final TextView sub = ui.text("e.g. the Netflix, YouTube or Prime Video button…", 14, Ui.SOFT, Ui.REGULAR);
+        addWithTop(panel, sub, 8);
+        final TextView cancel = ui.button("Cancel", false);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-2, -2);
+        clp.topMargin = ui.px(20);
+        panel.addView(cancel, clp);
+        final Dialog d = dialog(panel);
+        cancel.setOnClickListener(v -> d.dismiss());
+        d.setOnDismissListener(x -> KeyService.learner = null);
+        KeyService.learner = (code, name) -> {
+            KeyService.learner = null;
+            runOnUiThread(() -> { d.dismiss(); chooseAppFor(code, name); });
+            return true;
+        };
+        d.show();
+        cancel.requestFocus();
+    }
+
+    private void chooseAppFor(final int code, String keyName) {
+        LinearLayout panel = panel();
+        String nice = keyName.replace("KEYCODE_", "").replace('_', ' ');
+        panel.addView(ui.text("“" + nice + "” opens…", 22, Ui.WHITE, Ui.MEDIUM));
+        final Dialog d = dialog(panel);
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        sv.addView(list);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ui.px(420), ui.px(380));
+        slp.topMargin = ui.px(10);
+        panel.addView(sv, slp);
+        PackageManager pm = getPackageManager();
+        Map<String, String> apps = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (String cat : new String[]{Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
+            for (ResolveInfo ri : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(cat), 0)) {
+                String pkg = ri.activityInfo.packageName;
+                if (pkg.equals(getPackageName())) continue;
+                apps.put(label(ri), pkg);
+            }
+        }
+        View first = null;
+        for (Map.Entry<String, String> e : apps.entrySet()) {
+            final String pkg = e.getValue();
+            View b = menuButton(list, e.getKey(), () -> {
+                try {
+                    JSONObject m = buttonMap();
+                    m.put(String.valueOf(code), pkg);
+                    putJson(KeyService.KEY_BUTTONS, m);
+                    Toast.makeText(this, nice + " → " + appLabel(pkg), Toast.LENGTH_SHORT).show();
+                } catch (Exception ignored) { }
+            }, d);
+            if (first == null) first = b;
+        }
+        d.show();
+        if (first != null) first.requestFocus();
+    }
+
+    // =================================================================== account avatar
+
+    private String displayName() {
+        String n = config().optString("name", "").trim();
+        if (!n.isEmpty()) return n;
+        String acct = prefs().getString(KEY_ACCOUNT, "");
+        int at = acct.indexOf('@');
+        if (at <= 0) return "";
+        String local = acct.substring(0, at).replaceAll("[._\\d]+", " ").trim();
+        if (local.isEmpty()) return "";
+        String first = local.split(" ")[0];
+        return Character.toUpperCase(first.charAt(0)) + first.substring(1);
+    }
+
+    /** Photo pushed from the PC (scripts\\set-avatar.ps1) wins; otherwise the account's initial. */
+    private void refreshAvatar() {
+        if (avatar == null) return;
+        File dir = getExternalFilesDir(null);
+        File photo = null;
+        if (dir != null) for (String n : new String[]{"avatar.jpg", "avatar.png", "avatar.webp"}) {
+            File f = new File(dir, n);
+            if (f.isFile()) { photo = f; break; }
+        }
+        Bitmap bmp = null;
+        if (photo != null) {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(photo.getAbsolutePath(), o);
+            int sample = 1;
+            while (Math.max(o.outWidth, o.outHeight) / sample > 320) sample *= 2;
+            o = new BitmapFactory.Options();
+            o.inSampleSize = sample;
+            bmp = BitmapFactory.decodeFile(photo.getAbsolutePath(), o);
+        }
+        if (bmp != null) {
+            avatarImg.setImageBitmap(bmp);
+            avatarImg.setVisibility(View.VISIBLE);
+            avatarText.setVisibility(View.GONE);
+        } else {
+            avatarImg.setVisibility(View.GONE);
+            avatarText.setVisibility(View.VISIBLE);
+            String acct = prefs().getString(KEY_ACCOUNT, "");
+            String name = displayName();
+            avatarText.setText(!name.isEmpty() ? name.substring(0, 1).toUpperCase(Locale.getDefault())
+                    : !acct.isEmpty() ? acct.substring(0, 1).toUpperCase(Locale.getDefault()) : "👤");
+        }
+    }
+
+    private void showAccountMenu() {
+        LinearLayout panel = panel();
+        String acct = prefs().getString(KEY_ACCOUNT, "");
+        panel.addView(ui.text(acct.isEmpty() ? "Google account" : acct, 22, Ui.WHITE, Ui.MEDIUM));
+        TextView note = ui.text(acct.isEmpty()
+                ? "Choose the Google account used on this TV."
+                : "Signed in on this TV.", 13, Ui.SOFT, Ui.REGULAR);
+        addWithTop(panel, note, 6);
+        final Dialog d = dialog(panel);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(340), -2);
+        llp.topMargin = ui.px(14);
+        panel.addView(list, llp);
+        View first = menuButton(list, acct.isEmpty() ? "👤   Choose account" : "⇄   Change account", () -> {
+            try {
+                Intent pick = AccountManager.newChooseAccountIntent(null, null, new String[]{"com.google"},
+                        null, null, null, null);
+                startActivityForResult(pick, REQ_ACCOUNT);
+            } catch (Exception e) {
+                Toast.makeText(this, "Account picker not available on this TV", Toast.LENGTH_SHORT).show();
+            }
+        }, d);
+        menuButton(list, "⚙   Accounts & sign-in", () -> {
+            try {
+                Intent i = new Intent("android.settings.SYNC_SETTINGS");
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Exception e) {
+                safeStart(new Intent(Settings.ACTION_SETTINGS));
+            }
+        }, d);
+        menuButton(list, "✕   Close", null, d);
+        TextView tip = ui.text("Your Google photo can't be read by other apps.\nTo show it, run scripts\\set-avatar.ps1 once on the PC.", 11, Ui.MUTED, Ui.REGULAR);
+        tip.setLineSpacing(ui.px(2), 1f);
+        addWithTop(panel, tip, 14);
+        d.show();
+        first.requestFocus();
     }
 
     private void updateThemeLabel() {
@@ -412,7 +862,14 @@ public class HomeActivity extends Activity {
             applyTheme();
         });
         sys.addView(themeBox);
+        View arrangeBox = actionTile("⇄", "Arrange apps", null);
+        cardOf(arrangeBox).setOnClickListener(v -> startArrange());
+        sys.addView(arrangeBox, 0);
         updateThemeLabel();
+
+        TextView tip = ui.text("Tip: hold OK on any app (or press Menu) to move it   ·   or use  ⇄ Arrange apps  in System", 13, Ui.MUTED, Ui.REGULAR);
+        tip.setPadding(ui.px(6), ui.px(14), 0, ui.px(10));
+        rowsBox.addView(tip);
 
         View target = restore != null ? restore : first;
         if (target != null) target.requestFocus();
@@ -477,7 +934,9 @@ public class HomeActivity extends Activity {
 
         card.setOnFocusChangeListener((v, has) -> {
             float s = has ? 1.1f : 1f;
-            v.animate().scaleX(s).scaleY(s).translationY(has ? -ui.px(3) : 0).setDuration(140).start();
+            v.animate().scaleX(s).scaleY(s).translationY(has ? -ui.px(3) : 0)
+                    .setInterpolator(has ? new OvershootInterpolator(2.2f) : new DecelerateInterpolator())
+                    .setDuration(has ? 260 : 160).start();
             v.setElevation(has ? ui.px(10) : 0);
             label.setTextColor(has ? Ui.WHITE : Ui.MUTED);
             label.animate().translationY(has ? ui.px(5) : 0).setDuration(140).start();
@@ -511,6 +970,7 @@ public class HomeActivity extends Activity {
         card.setContentDescription(name);
         card.setOnFocusChangeListener(chain(card.getOnFocusChangeListener(), (v, has) -> { if (has) focusPkg = pkg; }));
         card.setOnClickListener(v -> {
+            if (arranging) { startMove(box); return; }
             Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
             if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
             if (launch != null) safeStart(launch);
@@ -607,12 +1067,60 @@ public class HomeActivity extends Activity {
 
     private FrameLayout cardOf(View box) { return (FrameLayout) ((ViewGroup) box).getChildAt(0); }
 
+    private static final String ARRANGE_HINT = "Arrange apps:  select an app, press OK to pick it up        BACK  finish";
+
     private void startMove(View box) {
         moving = box;
-        cardOf(box).setForeground(ui.moveRing(16));
-        hintBar.setText("◀  ▶   move app        OK   done");
-        hintBar.setVisibility(View.VISIBLE);
-        cardOf(box).requestFocus();
+        FrameLayout card = cardOf(box);
+        card.setForeground(ui.moveRing(16));
+        LayoutTransition lt = new LayoutTransition();
+        lt.disableTransitionType(LayoutTransition.APPEARING);
+        lt.disableTransitionType(LayoutTransition.DISAPPEARING);
+        lt.setDuration(220);
+        ((ViewGroup) box.getParent()).setLayoutTransition(lt); // neighbours slide aside
+        wiggle = ObjectAnimator.ofFloat(card, View.ROTATION, -1.6f, 1.6f);
+        wiggle.setDuration(150);
+        wiggle.setRepeatCount(ValueAnimator.INFINITE);
+        wiggle.setRepeatMode(ValueAnimator.REVERSE);
+        wiggle.start();
+        showHint("◀  ▶   move app        OK   drop here");
+        card.requestFocus();
+    }
+
+    private void showHint(String text) {
+        hintBar.setText(text);
+        if (hintBar.getVisibility() != View.VISIBLE) {
+            hintBar.setVisibility(View.VISIBLE);
+            hintBar.setAlpha(0f);
+            hintBar.setTranslationY(ui.px(30));
+            hintBar.animate().alpha(1f).translationY(0).setStartDelay(0).setDuration(260)
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        }
+    }
+
+    private void hideHint() {
+        hintBar.animate().alpha(0f).translationY(ui.px(30)).setStartDelay(0).setDuration(200)
+                .withEndAction(() -> hintBar.setVisibility(View.GONE)).start();
+    }
+
+    private void startArrange() {
+        arranging = true;
+        showHint(ARRANGE_HINT);
+        for (int i = 0; i < rowsBox.getChildCount(); i++) {
+            View c = rowsBox.getChildAt(i);
+            if (!(c instanceof HorizontalScrollView)) continue;
+            ViewGroup row = (ViewGroup) ((ViewGroup) c).getChildAt(0);
+            if (row.getChildCount() > 0 && row.getChildAt(0).getTag() instanceof String) {
+                cardOf(row.getChildAt(0)).requestFocus();
+                return;
+            }
+        }
+    }
+
+    private void stopArrange() {
+        arranging = false;
+        hideHint();
+        Toast.makeText(this, "Arrangement saved", Toast.LENGTH_SHORT).show();
     }
 
     private void moveBy(int delta) {
@@ -634,10 +1142,17 @@ public class HomeActivity extends Activity {
     }
 
     private void endMove() {
-        cardOf(moving).setForeground(ui.focusRing(16));
+        final FrameLayout card = cardOf(moving);
+        if (wiggle != null) wiggle.cancel();
+        card.setRotation(0f);
+        card.setForeground(ui.focusRing(16));
+        ((ViewGroup) moving.getParent()).setLayoutTransition(null);
+        // little "drop" bounce
+        card.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).withEndAction(() ->
+                card.animate().scaleX(1.1f).scaleY(1.1f).setInterpolator(new OvershootInterpolator(3f)).setDuration(240).start()).start();
         moving = null;
-        hintBar.setVisibility(View.GONE);
-        Toast.makeText(this, "Order saved", Toast.LENGTH_SHORT).show();
+        if (arranging) showHint(ARRANGE_HINT);
+        else { hideHint(); Toast.makeText(this, "Order saved", Toast.LENGTH_SHORT).show(); }
     }
 
     private void saveRowOrder(ViewGroup row) {
@@ -669,6 +1184,8 @@ public class HomeActivity extends Activity {
     }
 
     private void renderSubscriptions() {
+        for (Animator a : pulses) a.cancel();
+        pulses.clear();
         subsBox.removeAllViews();
         JSONArray subs = subscriptions();
         final LocalDate today = LocalDate.now();
@@ -745,6 +1262,7 @@ public class HomeActivity extends Activity {
             p.setPadding(ui.px(9), ui.px(4), ui.px(9), ui.px(4));
             p.setBackground(ui.round(color, 12, 0, 0));
             line.addView(p);
+            if (days != Long.MIN_VALUE && days <= 3) pulse(p);
 
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.topMargin = ui.px(8);
@@ -1009,6 +1527,8 @@ public class HomeActivity extends Activity {
         Dialog d = new Dialog(this);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         d.setContentView(content);
+        content.setAlpha(0f);
+        d.setOnShowListener(x -> popIn(content));
         Window w = d.getWindow();
         if (w != null) {
             w.setBackgroundDrawable(new ColorDrawable(0));
