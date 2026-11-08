@@ -20,9 +20,9 @@ The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB
   - **Several apps:** in the System row, open **⇄ Arrange apps**. For each app, press **OK** to pick it up, ◀ ▶ to move it and **OK** to drop it, then press **Back** when you're done.
 - **Animations:** a slowly drifting background, a floating weather icon, staggered slide-in on open, a bouncy focus zoom, pop-in dialogs, theme cross-fade and pulsing badges for subscriptions that are due soon. They pause while another app is open.
 - **⚙ Quick settings** (top right): Wi-Fi, Bluetooth, Picture & display, Sound, Inputs (HDMI), Screen saver, Remote buttons, Change theme and All settings.
-- **Profile avatar** (top right): set your name on the TV, and the greeting uses it. The Google account stays signed in, but Google TV's account picker was part of the disabled stock launcher, so it isn't used. Android doesn't let other apps read your Google profile photo, so to show it run `scripts\set-avatar.ps1 C:\path\photo.jpg` once.
+- **Profile avatar** (top right): select it, choose **Show my Google account**, and press **Allow**. The avatar then shows your account initial and the menu shows your Google email. You can also set a display name. The app targets SDK 25 on purpose: newer targets can't see Google accounts on Google TV without the stock launcher's picker.
 - **Remote app buttons** (Netflix, YouTube, Prime Video and others): Google TV normally handles these inside the stock launcher, which is disabled here. Avy TV Home includes a small accessibility service that handles them instead. It only sees button presses, never screen content. To set it up:
-  1. Turn it on once in **Settings → Accessibility → Avy TV Home remote buttons**. The shortcut is in ⚙ → Remote buttons. After an app update, switch it off and on once if the buttons stop working.
+  1. Turn it on once in **Settings → Accessibility → Avy TV Home remote buttons**. The shortcut is in ⚙ → Remote buttons. **This TV switches accessibility off whenever the app is updated**, so after an update, switch the helper off and on once.
   2. The Netflix (4062), YouTube (4099) and Prime Video (4065) buttons work out of the box. For other buttons, go to **⚙ → Remote buttons → Set up a button**, press the button, then pick the app. **Configuration** on the Accessibility page opens the same screen.
 
 ### Remote tips

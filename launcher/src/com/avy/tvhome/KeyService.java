@@ -59,6 +59,7 @@ public class KeyService extends AccessibilityService {
         }
 
         String pkg = mapped(code);
+        if (down && e.getRepeatCount() == 0) Log.i(TAG, "  -> " + (pkg == null ? "not mapped, passing through" : "opening " + pkg));
         if (pkg == null) return false;
         if (e.getAction() == KeyEvent.ACTION_UP) launch(pkg);
         return true; // swallow both down and up so nothing else reacts
@@ -95,8 +96,32 @@ public class KeyService extends AccessibilityService {
     }
 
     private boolean installed(String pkg) {
-        try { getPackageManager().getApplicationInfo(pkg, 0); return true; }
-        catch (PackageManager.NameNotFoundException e) { return false; }
+        PackageManager pm = getPackageManager();
+        if (pm.getLeanbackLaunchIntentForPackage(pkg) != null || pm.getLaunchIntentForPackage(pkg) != null) return true;
+        Log.w(TAG, "  app not found: " + pkg);
+        return false;
+    }
+
+    /** One-time cleanup: v2.2/2.3 let a single click switch buttons off by accident. */
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        resetAccidentalOffs(this);
+        Log.i(TAG, "helper connected");
+    }
+
+    static void resetAccidentalOffs(android.content.Context c) {
+        SharedPreferences p = c.getSharedPreferences("tvhome", MODE_PRIVATE);
+        if (p.getBoolean("buttons_reset_v24", false)) return;
+        try {
+            JSONObject m = new JSONObject(p.getString(KEY_BUTTONS, "{}"));
+            JSONObject clean = new JSONObject();
+            for (java.util.Iterator<String> it = m.keys(); it.hasNext(); ) {
+                String k = it.next();
+                if (!m.optString(k).isEmpty()) clean.put(k, m.optString(k));
+            }
+            p.edit().putString(KEY_BUTTONS, clean.toString()).putBoolean("buttons_reset_v24", true).apply();
+        } catch (Exception ignored) { }
     }
 
     private void launch(String pkg) {

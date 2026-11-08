@@ -679,14 +679,9 @@ public class HomeActivity extends Activity {
             final String code = en.getKey();
             if (en.getValue().isEmpty()) continue;
             String name = buttonName(Integer.parseInt(code));
-            menuButton(list, "🎮   " + name + "  →  " + appLabel(en.getValue()) + "      (select to turn off)", () -> {
-                try {
-                    JSONObject m = buttonMap();
-                    m.put(code, ""); // explicit off, also hides the default
-                    putJson(KeyService.KEY_BUTTONS, m);
-                } catch (Exception ignored) { }
-                showRemoteButtons();
-            }, d);
+            // selecting a row lets you pick a different app (turning off is a separate choice there)
+            menuButton(list, "🎮   " + name + "  →  " + appLabel(en.getValue()) + "      (change)",
+                    () -> chooseAppFor(Integer.parseInt(code), name), d);
         }
         menuButton(list, "Close", null, d);
         d.show();
@@ -727,8 +722,8 @@ public class HomeActivity extends Activity {
 
     private void chooseAppFor(final int code, String keyName) {
         LinearLayout panel = panel();
-        String nice = keyName.replace("KEYCODE_", "").replace('_', ' ');
-        panel.addView(ui.text("“" + nice + "” opens…", 22, Ui.WHITE, Ui.MEDIUM));
+        final String nice = buttonName(code);
+        panel.addView(ui.text(nice + " opens…", 22, Ui.WHITE, Ui.MEDIUM));
         final Dialog d = dialog(panel);
         ScrollView sv = new ScrollView(this);
         sv.setVerticalScrollBarEnabled(false);
@@ -760,6 +755,14 @@ public class HomeActivity extends Activity {
             }, d);
             if (first == null) first = b;
         }
+        menuButton(list, "⊘   Turn this button off", () -> {
+            try {
+                JSONObject m = buttonMap();
+                m.put(String.valueOf(code), "");
+                putJson(KeyService.KEY_BUTTONS, m);
+                Toast.makeText(this, nice + " turned off", Toast.LENGTH_SHORT).show();
+            } catch (Exception ignored) { }
+        }, d);
         d.show();
         if (first != null) first.requestFocus();
     }
@@ -779,8 +782,42 @@ public class HomeActivity extends Activity {
     }
 
     /** Photo pushed from the PC (scripts\\set-avatar.ps1) wins; otherwise the account's initial. */
+    private static final int REQ_ACCOUNTS_PERM = 43;
+
+    /**
+     * Reads the Google account signed in on the TV. Needs the "Contacts / accounts" permission
+     * (asked once). The app targets SDK 25 on purpose: since Android 8, apps targeting newer
+     * SDKs can't see Google accounts at all without Google's account picker, which on
+     * Google TV lives inside the (disabled) stock launcher.
+     */
+    private void readGoogleAccount() {
+        if (checkSelfPermission(android.Manifest.permission.GET_ACCOUNTS) != PackageManager.PERMISSION_GRANTED) {
+            if (!prefs().getBoolean("asked_accounts", false)) {
+                prefs().edit().putBoolean("asked_accounts", true).apply();
+                requestPermissions(new String[]{android.Manifest.permission.GET_ACCOUNTS}, REQ_ACCOUNTS_PERM);
+            }
+            return;
+        }
+        try {
+            android.accounts.Account[] list = AccountManager.get(this).getAccountsByType("com.google");
+            if (list.length > 0) prefs().edit().putString(KEY_ACCOUNT, list[0].name).apply();
+        } catch (Exception ignored) { }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int req, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(req, perms, res);
+        if (req == REQ_ACCOUNTS_PERM) {
+            readGoogleAccount();
+            refreshAvatar();
+            handler.removeCallbacks(clockTick);
+            handler.post(clockTick);
+        }
+    }
+
     private void refreshAvatar() {
         if (avatar == null) return;
+        readGoogleAccount();
         File dir = getExternalFilesDir(null);
         File photo = null;
         if (dir != null) for (String n : new String[]{"avatar.jpg", "avatar.png", "avatar.webp"}) {
@@ -819,14 +856,23 @@ public class HomeActivity extends Activity {
         LinearLayout panel = panel();
         String name = displayName();
         panel.addView(ui.text(name.isEmpty() ? "Your profile" : name, 22, Ui.WHITE, Ui.MEDIUM));
-        addWithTop(panel, ui.text("Your Google account is still signed in on this TV (Play Store, YouTube…).", 13, Ui.SOFT, Ui.REGULAR), 6);
+        String acct = prefs().getString(KEY_ACCOUNT, "");
+        addWithTop(panel, ui.text(acct.isEmpty()
+                ? "Google account signed in on this TV (Play Store, YouTube…)."
+                : "Google account:  " + acct, 14, Ui.SOFT, Ui.REGULAR), 6);
         final Dialog d = dialog(panel);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(380), -2);
         llp.topMargin = ui.px(14);
         panel.addView(list, llp);
-        View first = menuButton(list, "✎   " + (name.isEmpty() ? "Set your name" : "Change name"), this::editName, d);
+        View first = null;
+        if (checkSelfPermission(android.Manifest.permission.GET_ACCOUNTS) != PackageManager.PERMISSION_GRANTED) {
+            first = menuButton(list, "👤   Show my Google account", () ->
+                    requestPermissions(new String[]{android.Manifest.permission.GET_ACCOUNTS}, REQ_ACCOUNTS_PERM), d);
+        }
+        View nameBtn = menuButton(list, "✎   " + (name.isEmpty() ? "Set your name" : "Change name"), this::editName, d);
+        if (first == null) first = nameBtn;
         menuButton(list, "⚙   Accounts (Settings)", () -> safeStart(new Intent(Settings.ACTION_SETTINGS)), d);
         menuButton(list, "✕   Close", null, d);
         TextView tip = ui.text("Other apps can't read your Google profile photo.\nTo show it here, run scripts\\set-avatar.ps1 once on the PC.", 11, Ui.MUTED, Ui.REGULAR);

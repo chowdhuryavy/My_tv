@@ -39,7 +39,7 @@ if (Test-Path "$here\res") {
     if ($LASTEXITCODE) { throw 'aapt2 compile failed' }
     $resArgs = @("$out\res.zip")
 }
-& "$bt\aapt2.exe" link -o "$out\unsigned.apk" -I $androidJar --manifest "$here\AndroidManifest.xml" --min-sdk-version 26 --target-sdk-version 31 @resArgs
+& "$bt\aapt2.exe" link -o "$out\unsigned.apk" -I $androidJar --manifest "$here\AndroidManifest.xml" --min-sdk-version 25 --target-sdk-version 25 @resArgs
 if ($LASTEXITCODE) { throw 'aapt2 link failed' }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open("$out\unsigned.apk", 'Update')
