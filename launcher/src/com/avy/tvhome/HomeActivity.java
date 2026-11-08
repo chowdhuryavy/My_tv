@@ -184,7 +184,7 @@ public class HomeActivity extends Activity {
         refreshAvatar();
         syncGooglePhoto(false); // keeps the Google photo current (every few hours)
         // safety net: if Google's launcher was left on (e.g. the watcher was interrupted), switch it off
-        if (prefs().getBoolean(KEY_GL_ON, false) && !settingsWatch) new Thread(() -> restoreHome(false)).start();
+        if (prefs().getBoolean(KEY_GL_ON, false) && !settingsWatch) new Thread(() -> restoreHome(null, false)).start();
         handler.removeCallbacks(clockTick);
         handler.post(clockTick);
         startAmbient();
@@ -743,60 +743,73 @@ public class HomeActivity extends Activity {
             prefs().edit().putBoolean("adb_explained", true).apply();
             Toast.makeText(this, "First time only: on \"Allow USB debugging?\" tick Always allow, then Allow", Toast.LENGTH_LONG).show();
         }
+        if (settingsWatch) { safeStart(new Intent(Settings.ACTION_SETTINGS)); return; } // already on
         new Thread(() -> {
-            boolean on = false;
+            // One connection for the whole visit: the TV only asks for permission once.
+            LocalAdb.Session adb = null;
             try {
-                LocalAdb.shell(this, "pm enable " + GOOGLE_LAUNCHER, 15_000);
+                adb = LocalAdb.open(this, 15_000);
+                adb.shell("pm enable " + GOOGLE_LAUNCHER);
                 prefs().edit().putBoolean(KEY_GL_ON, true).apply();
-                on = true;
+                android.util.Log.i("AvyAdb", "Google launcher on for Settings");
             } catch (Exception e) {
                 android.util.Log.w("AvyAdb", "could not enable Google launcher", e);
+                if (adb != null) adb.close();
+                adb = null;
                 runOnUiThread(() -> Toast.makeText(this, "Accounts & Profiles needs debugging access (Allow on the TV)", Toast.LENGTH_LONG).show());
             }
             runOnUiThread(() -> safeStart(new Intent(Settings.ACTION_SETTINGS)));
-            if (on) watchSettingsThenRestore();
+            if (adb != null) {
+                try { watchSettingsThenRestore(adb); } finally { adb.close(); }
+            }
         }).start();
     }
 
+    /** Screens that count as "still in Settings" (Settings, Google's account screens, Play, permission dialogs…). */
+    private static boolean isSettingsScreen(String focus) {
+        if (focus.contains(GOOGLE_LAUNCHER)) return !focus.contains(".home."); // account check etc. yes, its home screen no
+        return focus.contains("com.android.tv.settings") || focus.contains("com.google.android.gms")
+                || focus.contains("permissioncontroller") || focus.contains("com.android.vending")
+                || focus.contains("com.android.systemui") || focus.contains("setupwraith") || focus.contains("=null");
+    }
+
     /** While Settings (or an account screen it opens) is in front, keep Google's launcher on; then switch back. */
-    private void watchSettingsThenRestore() {
+    private void watchSettingsThenRestore(LocalAdb.Session adb) {
         settingsWatch = true;
         long until = System.currentTimeMillis() + 45 * 60 * 1000L;
-        int away = 0;
+        String focus = "";
         try {
             Thread.sleep(2500);
-            while (settingsWatch && System.currentTimeMillis() < until) {
-                String focus = LocalAdb.shell(this, "dumpsys window | grep -m1 mCurrentFocus", 8_000);
-                boolean inSettings = focus.contains("com.android.tv.settings") || focus.contains("com.google.android.gms")
-                        || focus.contains("permissioncontroller") || focus.contains("com.android.vending")
-                        || focus.contains("=null");
-                away = inSettings ? 0 : away + 1;
-                if (away >= 1) {
-                    restoreHome(focus.contains(GOOGLE_LAUNCHER));
-                    return;
-                }
-                Thread.sleep(1500);
+            int away = 0;
+            while (System.currentTimeMillis() < until) {
+                focus = adb.shell("dumpsys window | grep -m1 mCurrentFocus");
+                away = isSettingsScreen(focus) ? 0 : away + 1;
+                if (away >= 2) break;            // left Settings (seen twice, to skip brief transitions)
+                Thread.sleep(1200);
             }
-            restoreHome(false);
+            android.util.Log.i("AvyAdb", "left Settings: " + focus.trim());
         } catch (Exception e) {
             android.util.Log.w("AvyAdb", "settings watch stopped", e);
         } finally {
+            restoreHome(adb, focus.contains(GOOGLE_LAUNCHER));
             settingsWatch = false;
         }
     }
 
     /** Google launcher off again, Avy is Home; if Google's home screen popped up, bring Avy back. */
-    private void restoreHome(boolean bringAvyBack) {
+    private void restoreHome(LocalAdb.Session adb, boolean bringAvyBack) {
+        LocalAdb.Session own = null;
         try {
-            LocalAdb.shell(this, "pm disable-user --user 0 " + GOOGLE_LAUNCHER
-                    + " ; cmd package set-home-activity " + getPackageName() + "/.HomeActivity", 15_000);
+            if (adb == null) adb = own = LocalAdb.open(this, 15_000);
+            adb.shell("pm disable-user --user 0 " + GOOGLE_LAUNCHER);
+            adb.shell("cmd package set-home-activity " + getPackageName() + "/.HomeActivity");
             prefs().edit().putBoolean(KEY_GL_ON, false).apply();
-            if (bringAvyBack) {
-                Intent i = new Intent(this, HomeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
-            }
+            android.util.Log.i("AvyAdb", "Google launcher off, Avy is Home");
+            if (bringAvyBack) startActivity(new Intent(this, HomeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (Exception e) {
             android.util.Log.w("AvyAdb", "restore failed", e);
+        } finally {
+            if (own != null) own.close();
         }
     }
 

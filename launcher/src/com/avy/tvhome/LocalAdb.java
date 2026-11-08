@@ -45,10 +45,19 @@ final class LocalAdb {
 
     private LocalAdb() { }
 
-    /** Runs a shell command on this TV and returns its output. Blocks; call off the main thread. */
-    static synchronized String shell(Context c, String command, int timeoutMs) throws Exception {
+    /** One-off shell command (opens and closes its own connection). Blocks; call off the main thread. */
+    static String shell(Context c, String command, int timeoutMs) throws Exception {
+        try (Session s = open(c, timeoutMs)) { return s.shell(command); }
+    }
+
+    /**
+     * Opens one authenticated connection that can run many commands. Keeping it open avoids
+     * the TV asking "Allow USB debugging?" again for every command.
+     */
+    static synchronized Session open(Context c, int timeoutMs) throws Exception {
         KeyPair keys = keys(c);
-        try (Socket s = new Socket()) {
+        Socket s = new Socket();
+        try {
             s.connect(new InetSocketAddress("127.0.0.1", 5555), 3000);
             s.setSoTimeout(timeoutMs);
             DataInputStream in = new DataInputStream(s.getInputStream());
@@ -66,19 +75,36 @@ final class LocalAdb {
                 } else if (!sentKey) {      // not known yet: offer the public key -> TV asks the user
                     send(out, AUTH, AUTH_RSAPUBLICKEY, 0, publicKeyPayload((RSAPublicKey) keys.getPublic()));
                     sentKey = true;
-                    s.setSoTimeout(60_000); // give the person time to press "Allow" on the TV
+                    s.setSoTimeout(90_000); // give the person time to press "Allow" on the TV
                 } else {
                     throw new Exception("debugging not allowed");
                 }
             }
             s.setSoTimeout(timeoutMs);
+            return new Session(s, in, out);
+        } catch (Exception e) {
+            try { s.close(); } catch (Exception ignored) { }
+            throw e;
+        }
+    }
 
-            int localId = 1;
+    /** An open, authenticated connection; run shell commands one after another, then close. */
+    static final class Session implements AutoCloseable {
+        private final Socket sock;
+        private final DataInputStream in;
+        private final OutputStream out;
+        private int nextId = 1;
+
+        Session(Socket sock, DataInputStream in, OutputStream out) { this.sock = sock; this.in = in; this.out = out; }
+
+        synchronized String shell(String command) throws Exception {
+            int localId = nextId++;
             send(out, OPEN, localId, 0, ("shell:" + command + "\0").getBytes(StandardCharsets.UTF_8));
             ByteArrayOutputStream result = new ByteArrayOutputStream();
             int remoteId = 0;
             while (true) {
                 Msg m = read(in);
+                if (m.arg1 != localId && m.cmd != CLSE) continue; // ignore stray packets
                 if (m.cmd == OKAY) { remoteId = m.arg0; continue; }
                 if (m.cmd == WRTE) {
                     result.write(m.data);
@@ -86,12 +112,15 @@ final class LocalAdb {
                     continue;
                 }
                 if (m.cmd == CLSE) {
+                    if (m.arg1 != localId) continue;
                     send(out, CLSE, localId, remoteId == 0 ? m.arg0 : remoteId, new byte[0]);
                     break;
                 }
             }
             return result.toString("UTF-8");
         }
+
+        @Override public void close() { try { sock.close(); } catch (Exception ignored) { } }
     }
 
     // ------------------------------------------------------------------ protocol
