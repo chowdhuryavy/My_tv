@@ -144,6 +144,7 @@ public class HomeActivity extends Activity {
         super.onCreate(savedInstanceState);
         ui = new Ui(this);
         importConfig(getIntent());
+        checkOpenExtra(getIntent());
         setContentView(buildUi());
         applyTheme();
     }
@@ -151,6 +152,7 @@ public class HomeActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        checkOpenExtra(intent);
         if (importConfig(intent)) {
             lastWeatherAt = 0;
             lat = Double.NaN;
@@ -168,6 +170,20 @@ public class HomeActivity extends Activity {
         handler.post(clockTick);
         startAmbient();
         playEntrance();
+        if (openButtonsPending) {
+            openButtonsPending = false;
+            handler.postDelayed(this::showRemoteButtons, 500);
+        }
+    }
+
+    /** Set when started from Accessibility → Configuration (ButtonsActivity). */
+    private boolean openButtonsPending;
+
+    private void checkOpenExtra(Intent i) {
+        if (i != null && "buttons".equals(i.getStringExtra("open"))) {
+            openButtonsPending = true;
+            i.removeExtra("open");
+        }
     }
 
     @Override
@@ -554,11 +570,11 @@ public class HomeActivity extends Activity {
         final Dialog d = dialog(panel);
         Object[][] items = {
             {"📶   Wi-Fi", new Intent(Settings.ACTION_WIFI_SETTINGS)},
-            {"ᛒ   Bluetooth", new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)},
+            {"ᛒ   Bluetooth & remotes", new Intent("com.android.tv.settings.ACCESSORIES_CONNECTED_DEVICES")},
             {"🖥   Picture & display", new Intent(Settings.ACTION_DISPLAY_SETTINGS)},
             {"🔊   Sound", new Intent(Settings.ACTION_SOUND_SETTINGS)},
             {"⎆   Inputs (HDMI)", new Intent("com.tcl.suspension.action.main").setPackage("com.tcl.suspension").putExtra("openInput", "true")},
-            {"🌙   Screen saver", new Intent(Settings.ACTION_DREAM_SETTINGS)},
+            {"🌙   Screen saver", new Intent("com.google.android.tv.settings.ambient")},
             {"🎮   Remote buttons", (Runnable) this::showRemoteButtons},
             {"🎨   Change theme", (Runnable) () -> {
                 prefs().edit().putInt(KEY_THEME, prefs().getInt(KEY_THEME, 0) + 1).apply();
@@ -631,20 +647,38 @@ public class HomeActivity extends Activity {
         } else {
             first = menuButton(list, "＋   Set up a button", this::learnButton, d);
         }
+        // effective mapping = built-in defaults, overridden by the user's choices ("" = off)
         JSONObject map = buttonMap();
-        for (Iterator<String> it = map.keys(); it.hasNext(); ) {
-            final String code = it.next();
-            String name = KeyEvent.keyCodeToString(Integer.parseInt(code)).replace("KEYCODE_", "").replace('_', ' ');
-            menuButton(list, "✕   " + name + "  →  " + appLabel(map.optString(code)) + "   (remove)", () -> {
-                JSONObject m = buttonMap();
-                m.remove(code);
-                putJson(KeyService.KEY_BUTTONS, m);
+        Map<String, String> eff = new LinkedHashMap<>();
+        for (int i = 0; i < KeyService.DEFAULT_CODES.length; i++) eff.put(String.valueOf(KeyService.DEFAULT_CODES[i][0]), KeyService.DEFAULT_PKGS[i]);
+        for (Iterator<String> it = map.keys(); it.hasNext(); ) { String k = it.next(); eff.put(k, map.optString(k)); }
+        for (Map.Entry<String, String> en : eff.entrySet()) {
+            final String code = en.getKey();
+            if (en.getValue().isEmpty()) continue;
+            String name = buttonName(Integer.parseInt(code));
+            menuButton(list, "🎮   " + name + "  →  " + appLabel(en.getValue()) + "      (select to turn off)", () -> {
+                try {
+                    JSONObject m = buttonMap();
+                    m.put(code, ""); // explicit off, also hides the default
+                    putJson(KeyService.KEY_BUTTONS, m);
+                } catch (Exception ignored) { }
                 showRemoteButtons();
             }, d);
         }
         menuButton(list, "Close", null, d);
         d.show();
         first.requestFocus();
+    }
+
+    private static String buttonName(int code) {
+        switch (code) {
+            case 4062: return "Netflix button";
+            case 4099: return "YouTube button";
+            case 4065: return "Prime Video button";
+            default:
+                String s = KeyEvent.keyCodeToString(code);
+                return s.startsWith("KEYCODE_") ? s.substring(8).replace('_', ' ') + " button" : "Button " + code;
+        }
     }
 
     private void learnButton() {
@@ -756,43 +790,68 @@ public class HomeActivity extends Activity {
     }
 
     private void showAccountMenu() {
+        // Note: Google TV's account picker lives in the stock launcher (disabled), and
+        // starting it from here makes Play Services loop. So no account picker: the user
+        // sets a display name instead; the Google account itself stays signed in.
         LinearLayout panel = panel();
-        String acct = prefs().getString(KEY_ACCOUNT, "");
-        panel.addView(ui.text(acct.isEmpty() ? "Google account" : acct, 22, Ui.WHITE, Ui.MEDIUM));
-        TextView note = ui.text(acct.isEmpty()
-                ? "Choose the Google account used on this TV."
-                : "Signed in on this TV.", 13, Ui.SOFT, Ui.REGULAR);
-        addWithTop(panel, note, 6);
+        String name = displayName();
+        panel.addView(ui.text(name.isEmpty() ? "Your profile" : name, 22, Ui.WHITE, Ui.MEDIUM));
+        addWithTop(panel, ui.text("Your Google account is still signed in on this TV (Play Store, YouTube…).", 13, Ui.SOFT, Ui.REGULAR), 6);
         final Dialog d = dialog(panel);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(340), -2);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(380), -2);
         llp.topMargin = ui.px(14);
         panel.addView(list, llp);
-        View first = menuButton(list, acct.isEmpty() ? "👤   Choose account" : "⇄   Change account", () -> {
-            try {
-                Intent pick = AccountManager.newChooseAccountIntent(null, null, new String[]{"com.google"},
-                        null, null, null, null);
-                startActivityForResult(pick, REQ_ACCOUNT);
-            } catch (Exception e) {
-                Toast.makeText(this, "Account picker not available on this TV", Toast.LENGTH_SHORT).show();
-            }
-        }, d);
-        menuButton(list, "⚙   Accounts & sign-in", () -> {
-            try {
-                Intent i = new Intent("android.settings.SYNC_SETTINGS");
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
-            } catch (Exception e) {
-                safeStart(new Intent(Settings.ACTION_SETTINGS));
-            }
-        }, d);
+        View first = menuButton(list, "✎   " + (name.isEmpty() ? "Set your name" : "Change name"), this::editName, d);
+        menuButton(list, "⚙   Accounts (Settings)", () -> safeStart(new Intent(Settings.ACTION_SETTINGS)), d);
         menuButton(list, "✕   Close", null, d);
-        TextView tip = ui.text("Your Google photo can't be read by other apps.\nTo show it, run scripts\\set-avatar.ps1 once on the PC.", 11, Ui.MUTED, Ui.REGULAR);
+        TextView tip = ui.text("Other apps can't read your Google profile photo.\nTo show it here, run scripts\\set-avatar.ps1 once on the PC.", 11, Ui.MUTED, Ui.REGULAR);
         tip.setLineSpacing(ui.px(2), 1f);
         addWithTop(panel, tip, 14);
         d.show();
         first.requestFocus();
+    }
+
+    private void editName() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Your name", 22, Ui.WHITE, Ui.MEDIUM));
+        final EditText field = new EditText(this);
+        field.setText(displayName());
+        field.setHint("e.g. Avy");
+        field.setSingleLine(true);
+        field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        field.setTextColor(Ui.WHITE);
+        field.setHintTextColor(0x80FFFFFF);
+        field.setTextSize(18);
+        field.setPadding(ui.px(16), ui.px(10), ui.px(16), ui.px(10));
+        field.setBackground(ui.glassItem(14));
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(ui.px(420), -2);
+        flp.topMargin = ui.px(14);
+        panel.addView(field, flp);
+        final Dialog d = dialog(panel);
+        LinearLayout actions = new LinearLayout(this);
+        TextView save = ui.button("Save", true);
+        save.setOnClickListener(v -> {
+            try {
+                JSONObject cfg = config();
+                cfg.put("name", field.getText().toString().trim());
+                putJson(KEY_CONFIG, cfg);
+            } catch (Exception ignored) { }
+            d.dismiss();
+            refreshAvatar();
+            handler.removeCallbacks(clockTick);
+            handler.post(clockTick);
+        });
+        actions.addView(save, buttonLp());
+        TextView cancel = ui.button("Cancel", false);
+        cancel.setOnClickListener(v -> d.dismiss());
+        actions.addView(cancel, buttonLp());
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, -2);
+        alp.topMargin = ui.px(18);
+        panel.addView(actions, alp);
+        d.show();
+        field.requestFocus(); // keyboard opens so the name can be typed right away
     }
 
     private void updateThemeLabel() {

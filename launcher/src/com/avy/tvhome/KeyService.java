@@ -64,14 +64,34 @@ public class KeyService extends AccessibilityService {
         return true; // swallow both down and up so nothing else reacts
     }
 
+    /**
+     * Built-in mapping for this TCL remote's app buttons (key codes captured on the TV).
+     * Anything set on the Remote buttons screen overrides these.
+     */
+    static final int[][] DEFAULT_CODES = {{4062}, {4099}, {4065}};
+    static final String[] DEFAULT_PKGS = {
+        "com.netflix.ninja",                     // 4062  Netflix button
+        "com.google.android.youtube.tv",         // 4099  YouTube button
+        "com.amazon.amazonvideo.livingroom",     // 4065  Prime Video button
+    };
+
+    static String defaultFor(int code) {
+        for (int i = 0; i < DEFAULT_CODES.length; i++) if (DEFAULT_CODES[i][0] == code) return DEFAULT_PKGS[i];
+        return null;
+    }
+
     private String mapped(int code) {
         SharedPreferences p = getSharedPreferences("tvhome", MODE_PRIVATE);
         try {
             JSONObject m = new JSONObject(p.getString(KEY_BUTTONS, "{}"));
-            String pkg = m.optString(String.valueOf(code), "");
-            if (!pkg.isEmpty() && installed(pkg)) return pkg;
+            String key = String.valueOf(code);
+            if (m.has(key)) {
+                String pkg = m.optString(key, "");
+                return !pkg.isEmpty() && installed(pkg) ? pkg : null; // "" = user turned it off
+            }
         } catch (Exception ignored) { }
-        return null;
+        String def = defaultFor(code);
+        return def != null && installed(def) ? def : null;
     }
 
     private boolean installed(String pkg) {
