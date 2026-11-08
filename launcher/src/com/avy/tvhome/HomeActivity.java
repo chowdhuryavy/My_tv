@@ -108,7 +108,7 @@ public class HomeActivity extends Activity {
     private static final int REQ_ACCOUNT = 42;
     private static final String KEY_ACCOUNT = "account";
     private FrameLayout avatar;
-    private View gearButton;
+    private View gearButton, searchButton;
     private TextView avatarText;
     private ImageView avatarImg;
     // arrange mode: OK picks up an app instead of opening it
@@ -421,6 +421,26 @@ public class HomeActivity extends Activity {
         avatar.setOnClickListener(v -> showAccountMenu());
         avatar.setOnFocusChangeListener((v, has) -> v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
                 .setInterpolator(new OvershootInterpolator(2f)).setDuration(220).start());
+        // ---- app search (left of the gear)
+        TextView search = ui.text("🔍", 18, Ui.WHITE, Ui.REGULAR);
+        search.setGravity(Gravity.CENTER);
+        search.setFocusable(true);
+        search.setClickable(true);
+        search.setContentDescription("Search apps");
+        StateListDrawable sbg = new StateListDrawable();
+        GradientDrawable sOn = new GradientDrawable(); sOn.setShape(GradientDrawable.OVAL); sOn.setColor(0x4DFFFFFF); sOn.setStroke(ui.px(3), Ui.WHITE);
+        GradientDrawable sOff = new GradientDrawable(); sOff.setShape(GradientDrawable.OVAL); sOff.setColor(0x26FFFFFF); sOff.setStroke(ui.px(1), 0x40FFFFFF);
+        sbg.addState(new int[]{android.R.attr.state_focused}, sOn);
+        sbg.addState(new int[]{}, sOff);
+        search.setBackground(sbg);
+        search.setOnClickListener(v -> showAppSearch());
+        search.setOnFocusChangeListener((v, has) -> v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
+                .setInterpolator(new OvershootInterpolator(2f)).setDuration(220).start());
+        LinearLayout.LayoutParams sbl = new LinearLayout.LayoutParams(ui.px(40), ui.px(40));
+        sbl.leftMargin = ui.px(14);
+        header.addView(search, sbl);
+        searchButton = search;
+
         // ---- quick settings gear (left of the avatar)
         TextView gear = ui.text("⚙", 20, Ui.WHITE, Ui.REGULAR);
         gear.setGravity(Gravity.CENTER);
@@ -599,6 +619,7 @@ public class HomeActivity extends Activity {
         DecelerateInterpolator dec = new DecelerateInterpolator(2f);
         slideIn(headerView, -ui.px(24), 0, 0, dec);
         slideIn(weatherCard, ui.px(40), 0, 80, dec);
+        slideIn(searchButton, ui.px(40), 0, 95, dec);
         slideIn(gearButton, ui.px(40), 0, 110, dec);
         slideIn(avatar, ui.px(40), 0, 140, dec);
         slideIn(subsCard, 0, -ui.px(16), 200, dec);
@@ -688,6 +709,110 @@ public class HomeActivity extends Activity {
         panel.addView(grid, glp);
         d.show();
         first.requestFocus();
+    }
+
+    // =================================================================== app search
+
+    /** Type to find an app; results narrow as you type; OK opens it. */
+    private void showAppSearch() {
+        final PackageManager pm = getPackageManager();
+        // every launchable app, once, sorted by name
+        final List<String[]> all = new ArrayList<>(); // {label, package}
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String cat : new String[]{Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
+            for (ResolveInfo ri : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(cat), 0)) {
+                String pkg = ri.activityInfo.packageName;
+                if (pkg.equals(getPackageName()) || !seen.add(pkg)) continue;
+                all.add(new String[]{label(ri), pkg});
+            }
+        }
+        Collections.sort(all, (a, b) -> a[0].compareToIgnoreCase(b[0]));
+
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Search apps", 24, Ui.WHITE, Ui.MEDIUM));
+        final EditText q = new EditText(this);
+        q.setHint("Type an app name…");
+        q.setSingleLine(true);
+        q.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        q.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        q.setTextColor(Ui.WHITE);
+        q.setHintTextColor(0x80FFFFFF);
+        q.setTextSize(18);
+        q.setPadding(ui.px(16), ui.px(10), ui.px(16), ui.px(10));
+        q.setBackground(ui.glassItem(14));
+        LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(ui.px(560), -2);
+        qlp.topMargin = ui.px(12);
+        panel.addView(q, qlp);
+        final TextView count = ui.text("", 12, Ui.MUTED, Ui.REGULAR);
+        addWithTop(panel, count, 8);
+
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.setClipToPadding(false);
+        final LinearLayout results = new LinearLayout(this);
+        results.setOrientation(LinearLayout.VERTICAL);
+        results.setPadding(ui.px(2), ui.px(4), ui.px(2), ui.px(4));
+        sv.addView(results);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ui.px(560), ui.px(300));
+        slp.topMargin = ui.px(6);
+        panel.addView(sv, slp);
+        final Dialog d = dialog(panel);
+
+        final Runnable refresh = () -> {
+            String term = q.getText().toString().trim().toLowerCase(Locale.getDefault());
+            results.removeAllViews();
+            int shown = 0;
+            for (final String[] app : all) {
+                if (!term.isEmpty() && !app[0].toLowerCase(Locale.getDefault()).contains(term)
+                        && !app[1].toLowerCase(Locale.ROOT).contains(term)) continue;
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setFocusable(true);
+                row.setClickable(true);
+                row.setBackground(ui.glassItem(14));
+                row.setPadding(ui.px(12), ui.px(7), ui.px(12), ui.px(7));
+                try {
+                    ImageView iv = new ImageView(this);
+                    iv.setImageDrawable(pm.getApplicationIcon(app[1]));
+                    LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ui.px(30), ui.px(30));
+                    ilp.rightMargin = ui.px(12);
+                    row.addView(iv, ilp);
+                } catch (Exception ignored) { }
+                row.addView(ui.text(app[0], 15, Ui.WHITE, Ui.MEDIUM));
+                row.setOnClickListener(v -> { d.dismiss(); KeyService.openApp(this, app[1]); });
+                row.setAlpha(0f);
+                row.setTranslationY(ui.px(8));
+                row.animate().alpha(1f).translationY(0).setStartDelay(Math.min(shown, 8) * 25L).setDuration(180).start();
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
+                rlp.topMargin = ui.px(6);
+                results.addView(row, rlp);
+                shown++;
+            }
+            count.setText(shown == 0 ? "No app matches “" + q.getText() + "”"
+                    : term.isEmpty() ? all.size() + " apps" : shown + (shown == 1 ? " match" : " matches") + "  ·  press ▼ to pick");
+        };
+        q.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { refresh.run(); }
+            @Override public void afterTextChanged(android.text.Editable s) { }
+        });
+        // keyboard "search"/"done": close the keyboard and jump to the first result
+        q.setOnEditorActionListener((v, actionId, ev) -> {
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+            if (results.getChildCount() > 0) results.getChildAt(0).requestFocus();
+            return true;
+        });
+        refresh.run();
+        d.show();
+        q.requestFocus();
+        handler.postDelayed(() -> {
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(q, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        }, 300);
     }
 
     // =================================================================== weather details
