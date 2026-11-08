@@ -1,13 +1,33 @@
 # My TV
 
-Setup for **Avy's TV**, a TCL Google TV (G10, Android 12, 1.8 GB RAM), managed from a Windows PC over adb.
+Setup for **Avy's TV**, a TCL Google TV (G10, Android 12, 1.8 GB RAM).
 
-The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB including its services). This repo replaces it with **Avy TV Home**, a small ad-free launcher that shows:
+The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB including its services). This repo replaces it with **Avy TV Home**, a small ad-free launcher of about 36 KB with a glass look. **Once it's installed, everything works on the TV with the remote. The PC is only needed to install or update it.**
 
-- the time and date
-- the current weather for your location, from [Open-Meteo](https://open-meteo.com) with no API key needed. The city is detected from your internet IP unless you set one.
-- your paid subscriptions with their expiry dates and days left, coloured green, amber (14 days or less) or red (3 days or less, or expired)
-- your apps sorted into rows: **Streaming**, **Sports & Live**, **Tools**, **More apps** and **System**
+## Features
+
+- **Glass theme:** a soft colour backdrop with frosted-glass cards. Choose from Aurora, Ocean, Sunset or Forest with the **Theme** tile in the *System* row.
+- **Clock** with a greeting and the date.
+- **Live weather** from [Open-Meteo](https://open-meteo.com): temperature, feels-like, high/low, humidity, wind and a 3-day forecast. The location is detected automatically, and it refreshes every 30 minutes.
+- **Subscription tracker, managed on the TV:**
+  - Select **+ Add**, pick the app (Netflix, Prime Video, Apple TV and others) or type a name, then set the date and choose One-time, Monthly or Yearly.
+  - Monthly and yearly plans roll their date forward automatically, so you only enter them once.
+  - The badge shows the days left: green, amber (14 days or less) or red (3 days or less, or expired).
+  - Select a subscription to edit or delete it.
+- **Apps in rows:** Streaming, Sports & Live, Tools, More apps and System.
+- **Reordering:** hold **OK** on an app (or press **Menu**), choose **Move left / right**, use ◀ ▶ to move it, then press **OK**. *Move to start* and *Move to end* are also in that menu, and the order is remembered.
+
+### Remote tips
+
+| Where | Do |
+|---|---|
+| Top app row | Press **▲** to jump to **+ Add** |
+| Date fields | Press **OK** on Day, Month or Year, change it with **▲ ▼**, then press **OK** again |
+| Name field | Press **OK** to open the keyboard |
+
+### Why subscriptions aren't detected automatically
+
+Android keeps each app's account data private to that app, and Netflix, Prime Video and Apple TV have no public API for plan or expiry dates. A launcher can't read them. Setting a plan to Monthly or Yearly means you enter it once and the TV keeps the date up to date.
 
 ## Layout
 
@@ -15,41 +35,26 @@ The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB
 |---|---|
 | `tv-snapshot/` | The TV's setup before the change: device info, launchers, installed apps |
 | `launcher/` | Avy TV Home source (plain Java, no Gradle) and `build.ps1` |
-| `config/config.example.json` | Template for the city and subscriptions |
-| `config/config.json` | **Your real values. Git-ignored, never pushed.** |
-| `scripts/` | Snapshot, install, config and restore scripts |
+| `scripts/` | Snapshot, install, restore and optional config scripts |
+| `config/config.json` | Optional city override. **Git-ignored.** |
 
-## Usage
+## PC scripts
 
 The default TV address is `192.168.1.124:5555`. To use a different one, set `$env:TV_ADDR` first.
 
 ```powershell
 scripts\snapshot.ps1                 # save current TV setup into tv-snapshot\
 launcher\build.ps1                   # build launcher\out\avy-tv-home.apk
-scripts\install-launcher.ps1         # install it, make it Home, turn off the stock launcher
-scripts\set-config.ps1               # after editing config\config.json (subscriptions/city)
+scripts\install-launcher.ps1         # install/update it and make it the home screen
+scripts\set-config.ps1               # optional: force a weather city from config\config.json
 scripts\restore-stock-launcher.ps1   # go back to the original Google TV home
 ```
-
-### Subscriptions
-
-Edit `config/config.json`, using dates in `YYYY-MM-DD` format:
-
-```json
-{
-  "city": "",
-  "subscriptions": [
-    { "name": "Crunchyroll", "expires": "2026-12-31" }
-  ]
-}
-```
-
-Leave `city` empty to detect it automatically, or set it to a city name such as `"Dhaka"`. Then run `scripts\set-config.ps1`.
 
 ### Build requirements
 
 - JDK 17: `winget install Microsoft.OpenJDK.17`
 - From the Android SDK: `platforms;android-31` and `build-tools;35.0.1`. `build.ps1` looks for them in `%LOCALAPPDATA%\Android\sdk-lite`, `%LOCALAPPDATA%\Android\Sdk` or `ANDROID_HOME`.
+- Updates must be signed with the same `launcher\signing.keystore`. It's created on the first build, is git-ignored, and should be backed up. If it's lost, uninstall the app before installing a new build. That also clears the subscriptions saved on the TV.
 
 ## What gets changed on the TV
 

@@ -1,32 +1,38 @@
 package com.avy.tvhome;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Color;
-import android.graphics.Typeface;
+import android.graphics.Bitmap;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.InputType;
+import android.text.TextUtils;
 import android.util.Base64;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.inputmethod.EditorInfo;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -38,42 +44,49 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.format.TextStyle;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * Lightweight, ad-free home screen: clock, live weather, subscription expiry
- * countdowns and the TV's apps grouped into rows.
+ * Avy TV Home: ad-free glass home screen with clock, live weather, subscription
+ * tracker (edited on the TV) and reorderable app rows.
  */
 public class HomeActivity extends Activity {
 
     private static final String PREFS = "tvhome";
     private static final String KEY_CONFIG = "config_json";
+    private static final String KEY_ORDER = "order_json";
+    private static final String KEY_THEME = "theme";
     private static final long WEATHER_EVERY_MS = 30 * 60 * 1000L;
-
-    private static final int BG_TOP = 0xFF0E1621;
-    private static final int BG_BOTTOM = 0xFF1A2636;
-    private static final int CARD = 0xFF1F2D3F;
-    private static final int CARD_FOCUS = 0xFF2E4A6B;
-    private static final int ACCENT = 0xFF4FC3F7;
-    private static final int TEXT = 0xFFECEFF4;
-    private static final int MUTED = 0xFF93A1B3;
-    private static final int GREEN = 0xFF66BB6A;
-    private static final int AMBER = 0xFFFFB74D;
-    private static final int RED = 0xFFEF5350;
+    private static final String[] REPEATS = {"once", "monthly", "yearly"};
+    private static final String[] REPEAT_LABELS = {"One-time", "Monthly", "Yearly"};
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private float dp;
-    private TextView clockView, dateView, weatherMain, weatherDesc, weatherExtra;
+    private Ui ui;
+    private ImageView backdrop;
+    private TextView greeting, clockView, ampmView, dateView;
+    private TextView weatherIcon, weatherTemp, weatherDesc, weatherExtra, forecastView;
+    private TextView hintBar, themeTile;
     private LinearLayout rowsBox, subsBox;
+    private TextView subsSummary;
+    private int addButtonId;
+
+    private View moving;            // tile container being moved, or null
+    private String focusPkg;        // last focused app, restored after refresh
+    private final List<ResolveInfo> streamingApps = new ArrayList<>();
+
     private long lastWeatherAt = 0;
     private double lat = Double.NaN, lon = Double.NaN;
     private String place = "";
@@ -82,18 +95,24 @@ public class HomeActivity extends Activity {
         @Override public void run() {
             Date now = new Date();
             clockView.setText(new SimpleDateFormat("h:mm", Locale.getDefault()).format(now));
+            ampmView.setText(new SimpleDateFormat("a", Locale.getDefault()).format(now));
             dateView.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
+            int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+            greeting.setText(h < 5 ? "Good night" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : h < 22 ? "Good evening" : "Good night");
             if (System.currentTimeMillis() - lastWeatherAt > WEATHER_EVERY_MS) loadWeather();
-            handler.postDelayed(this, 20_000);
+            handler.postDelayed(this, 15_000);
         }
     };
+
+    // =================================================================== lifecycle
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        dp = getResources().getDisplayMetrics().density;
+        ui = new Ui(this);
         importConfig(getIntent());
         setContentView(buildUi());
+        applyTheme();
     }
 
     @Override
@@ -119,126 +138,232 @@ public class HomeActivity extends Activity {
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(clockTick);
+        if (moving != null) endMove();
     }
 
     @Override
-    public void onBackPressed() {
-        // Home screen: Back does nothing.
+    public void onBackPressed() { /* home screen: nothing to go back to */ }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        if (moving == null) return super.dispatchKeyEvent(e);
+        if (e.getAction() == KeyEvent.ACTION_DOWN) {
+            switch (e.getKeyCode()) {
+                case KeyEvent.KEYCODE_DPAD_LEFT: moveBy(-1); break;
+                case KeyEvent.KEYCODE_DPAD_RIGHT: moveBy(1); break;
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                case KeyEvent.KEYCODE_BACK:
+                case KeyEvent.KEYCODE_ESCAPE: endMove(); break;
+                default: break;
+            }
+        }
+        return true; // swallow everything else while moving
     }
 
-    // ---------------------------------------------------------------- config
+    // =================================================================== storage
 
-    /** Config arrives from the PC as base64 JSON: am start ... --es config_b64 <data>. */
+    private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }
+
+    private JSONObject json(String key) {
+        try { return new JSONObject(prefs().getString(key, "{}")); } catch (Exception e) { return new JSONObject(); }
+    }
+
+    private void putJson(String key, JSONObject o) { prefs().edit().putString(key, o.toString()).apply(); }
+
+    private JSONObject config() { return json(KEY_CONFIG); }
+
+    /** Optional settings pushed from a PC (e.g. city). Keys present replace existing ones; others are kept. */
     private boolean importConfig(Intent intent) {
-        if (intent == null) return false;
-        String b64 = intent.getStringExtra("config_b64");
+        String b64 = intent == null ? null : intent.getStringExtra("config_b64");
         if (b64 == null) return false;
         try {
-            String json = new String(Base64.decode(b64, Base64.DEFAULT), StandardCharsets.UTF_8);
-            new JSONObject(json); // validate
-            prefs().edit().putString(KEY_CONFIG, json).apply();
+            JSONObject in = new JSONObject(new String(Base64.decode(b64, Base64.DEFAULT), StandardCharsets.UTF_8));
+            JSONObject cfg = config();
+            for (Iterator<String> it = in.keys(); it.hasNext(); ) {
+                String k = it.next();
+                cfg.put(k, in.get(k));
+            }
+            putJson(KEY_CONFIG, cfg);
             return true;
         } catch (Exception e) {
             return false;
         }
     }
 
-    private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }
-
-    private JSONObject config() {
-        try {
-            return new JSONObject(prefs().getString(KEY_CONFIG, "{}"));
-        } catch (Exception e) {
-            return new JSONObject();
-        }
+    private JSONArray subscriptions() {
+        JSONArray a = config().optJSONArray("subscriptions");
+        return a == null ? new JSONArray() : a;
     }
 
-    // ---------------------------------------------------------------- layout
+    private void saveSubscriptions(JSONArray subs) {
+        try {
+            JSONObject cfg = config();
+            cfg.put("subscriptions", subs);
+            putJson(KEY_CONFIG, cfg);
+        } catch (Exception ignored) { }
+    }
+
+    // =================================================================== layout
 
     private View buildUi() {
         FrameLayout root = new FrameLayout(this);
-        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{BG_TOP, BG_BOTTOM}));
+        backdrop = new ImageView(this);
+        backdrop.setScaleType(ImageView.ScaleType.FIT_XY);
+        root.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(px(40), px(24), px(40), px(16));
+        page.setPadding(ui.px(48), ui.px(26), ui.px(48), ui.px(8));
+        page.setClipChildren(false);
         root.addView(page, new FrameLayout.LayoutParams(-1, -1));
 
-        // Header: clock/date on the left, weather on the right.
+        // ---- header
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
-        LinearLayout timeBox = new LinearLayout(this);
-        timeBox.setOrientation(LinearLayout.VERTICAL);
-        clockView = text("", 46, TEXT, true);
-        dateView = text("", 16, MUTED, false);
-        timeBox.addView(clockView);
-        timeBox.addView(dateView);
-        header.addView(timeBox, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout timeCol = new LinearLayout(this);
+        timeCol.setOrientation(LinearLayout.VERTICAL);
+        greeting = ui.text("", 17, Ui.SOFT, Ui.REGULAR);
+        LinearLayout clockRow = new LinearLayout(this);
+        clockRow.setOrientation(LinearLayout.HORIZONTAL);
+        clockRow.setBaselineAligned(true);
+        clockView = ui.text("", 58, Ui.WHITE, Ui.LIGHT);
+        ampmView = ui.text("", 20, Ui.SOFT, Ui.REGULAR);
+        ampmView.setPadding(ui.px(8), 0, 0, 0);
+        clockRow.addView(clockView);
+        clockRow.addView(ampmView);
+        dateView = ui.text("", 17, Ui.SOFT, Ui.REGULAR);
+        timeCol.addView(greeting);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-2, -2);
+        clp.topMargin = ui.px(4);
+        timeCol.addView(clockRow, clp);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
+        dlp.topMargin = ui.px(6);
+        timeCol.addView(dateView, dlp);
+        header.addView(timeCol, new LinearLayout.LayoutParams(0, -2, 1));
 
-        LinearLayout weatherBox = new LinearLayout(this);
-        weatherBox.setOrientation(LinearLayout.VERTICAL);
-        weatherBox.setGravity(Gravity.END);
-        weatherMain = text("…", 34, TEXT, true);
-        weatherMain.setGravity(Gravity.END);
-        weatherDesc = text("Loading weather", 15, ACCENT, false);
-        weatherDesc.setGravity(Gravity.END);
-        weatherExtra = text("", 13, MUTED, false);
-        weatherExtra.setGravity(Gravity.END);
-        weatherBox.addView(weatherMain);
-        weatherBox.addView(weatherDesc);
-        weatherBox.addView(weatherExtra);
-        header.addView(weatherBox);
+        LinearLayout weather = new LinearLayout(this);
+        weather.setOrientation(LinearLayout.HORIZONTAL);
+        weather.setGravity(Gravity.CENTER_VERTICAL);
+        weather.setBackground(ui.glass(22));
+        weather.setPadding(ui.px(22), ui.px(14), ui.px(24), ui.px(14));
+        weatherIcon = ui.text("⛅", 46, Ui.WHITE, Ui.REGULAR);
+        weather.addView(weatherIcon);
+        LinearLayout wCol = new LinearLayout(this);
+        wCol.setOrientation(LinearLayout.VERTICAL);
+        wCol.setPadding(ui.px(16), 0, 0, 0);
+        weatherTemp = ui.text("--°", 34, Ui.WHITE, Ui.LIGHT);
+        weatherDesc = ui.text("Loading weather…", 15, Ui.WHITE, Ui.MEDIUM);
+        weatherExtra = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
+        forecastView = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
+        wCol.addView(weatherTemp);
+        addWithTop(wCol, weatherDesc, 4);
+        addWithTop(wCol, weatherExtra, 4);
+        addWithTop(wCol, forecastView, 4);
+        weather.addView(wCol);
+        header.addView(weather);
         page.addView(header);
 
-        // Body: app rows (left) + subscriptions card (right).
+        // ---- body
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(-1, 0, 1);
-        bodyLp.topMargin = px(14);
-        page.addView(body, bodyLp);
+        body.setClipChildren(true);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, 0, 1);
+        blp.topMargin = ui.px(14);
+        page.addView(body, blp);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setVerticalScrollBarEnabled(false);
+        scroll.setClipChildren(true);
         scroll.setClipToPadding(false);
+        scroll.setPadding(0, 0, 0, ui.px(40));
         rowsBox = new LinearLayout(this);
         rowsBox.setOrientation(LinearLayout.VERTICAL);
+        rowsBox.setClipChildren(true);
         scroll.addView(rowsBox);
         body.addView(scroll, new LinearLayout.LayoutParams(0, -1, 1));
 
         LinearLayout subsCard = new LinearLayout(this);
         subsCard.setOrientation(LinearLayout.VERTICAL);
-        subsCard.setPadding(px(16), px(14), px(16), px(14));
-        subsCard.setBackground(rounded(CARD, 14, 0));
-        subsCard.addView(text("Subscriptions", 17, TEXT, true));
+        subsCard.setBackground(ui.glass(22));
+        subsCard.setPadding(ui.px(18), ui.px(16), ui.px(18), ui.px(16));
+        LinearLayout subsHead = new LinearLayout(this);
+        subsHead.setOrientation(LinearLayout.HORIZONTAL);
+        subsHead.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
+        titleCol.addView(ui.text("Subscriptions", 18, Ui.WHITE, Ui.MEDIUM));
+        subsSummary = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
+        addWithTop(titleCol, subsSummary, 3);
+        subsHead.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView add = ui.button("+  Add", true);
+        add.setPadding(ui.px(14), ui.px(7), ui.px(14), ui.px(7));
+        add.setTextSize(13);
+        add.setOnClickListener(v -> editSubscription(-1));
+        addButtonId = View.generateViewId();
+        add.setId(addButtonId);
+        subsHead.addView(add);
+        subsCard.addView(subsHead);
+        ScrollView subsScroll = new ScrollView(this);
+        subsScroll.setVerticalScrollBarEnabled(false);
+        subsScroll.setClipToPadding(false);
         subsBox = new LinearLayout(this);
         subsBox.setOrientation(LinearLayout.VERTICAL);
-        subsCard.addView(subsBox);
-        LinearLayout.LayoutParams subsLp = new LinearLayout.LayoutParams(px(250), -2);
-        subsLp.leftMargin = px(20);
-        subsLp.topMargin = px(26);
-        body.addView(subsCard, subsLp);
+        subsBox.setPadding(ui.px(2), ui.px(4), ui.px(2), ui.px(4));
+        subsScroll.addView(subsBox);
+        LinearLayout.LayoutParams sslp = new LinearLayout.LayoutParams(-1, -2);
+        sslp.topMargin = ui.px(8);
+        subsCard.addView(subsScroll, sslp);
+        LinearLayout.LayoutParams sclp = new LinearLayout.LayoutParams(ui.px(290), -2);
+        sclp.leftMargin = ui.px(26);
+        sclp.topMargin = ui.px(34);
+        body.addView(subsCard, sclp);
 
+        // ---- hint bar (move mode)
+        hintBar = ui.text("", 15, Ui.WHITE, Ui.MEDIUM);
+        hintBar.setBackground(ui.glassPanel(24));
+        hintBar.setPadding(ui.px(24), ui.px(12), ui.px(24), ui.px(12));
+        hintBar.setVisibility(View.GONE);
+        FrameLayout.LayoutParams hlp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        hlp.bottomMargin = ui.px(22);
+        root.addView(hintBar, hlp);
         return root;
     }
 
-    // ---------------------------------------------------------------- apps
+    private void addWithTop(LinearLayout parent, View v, int topDp) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = ui.px(topDp);
+        parent.addView(v, lp);
+    }
+
+    private void applyTheme() {
+        int t = prefs().getInt(KEY_THEME, 0);
+        Bitmap b = Ui.backdrop(t);
+        backdrop.setImageBitmap(b);
+        updateThemeLabel();
+    }
+
+    private void updateThemeLabel() {
+        if (themeTile != null) themeTile.setText(Ui.THEMES[Math.floorMod(prefs().getInt(KEY_THEME, 0), Ui.THEMES.length)] + " theme");
+    }
+
+    // =================================================================== apps
 
     private static final String[][] GROUPS = {
-        {"Streaming", "crunchyroll", "shahid", "starz", "osn", "sunnxt", "iqiyi", "appletv", "bstar",
-            "netflix", "youtube", "amazonvideo", "disney", "hotstar", "videos", "ahaflix", "moviebox",
-            "bluesun", "plex", "spotify", "mediashell"},
-        {"Sports & Live", "sportzfy", "cricfy", "sport", "live", "tv.channels"},
-        {"Tools", "browser", "downloader", "sendfiles", "vpn", "files", "playstore", "vending"},
+        {"Streaming", "netflix", "amazonvideo", "primevideo", "appletv", "disney", "hotstar", "youtube", "crunchyroll",
+            "shahid", "starz", "osn", "sunnxt", "iqiyi", "bstar", "ahaflix", "moviebox", "bluesun", "plex", "spotify",
+            "videos", "hbo", "max", "zee5", "sonyliv", "jiocinema"},
+        {"Sports & Live", "sportzfy", "cricfy", "sport", "live", "tv.channels", "dazn", "espn"},
+        {"Tools", "browser", "downloader", "sendfiles", "vpn", "files", "vending", "playstore"},
     };
 
     private void renderApps() {
         PackageManager pm = getPackageManager();
         Map<String, ResolveInfo> apps = new LinkedHashMap<>();
         for (String cat : new String[]{Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
-            Intent q = new Intent(Intent.ACTION_MAIN).addCategory(cat);
-            for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
+            for (ResolveInfo ri : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(cat), 0)) {
                 String pkg = ri.activityInfo.packageName;
                 if (pkg.equals(getPackageName()) || pkg.startsWith("com.google.android.apps.tv.launcher")) continue;
                 if (!apps.containsKey(pkg)) apps.put(pkg, ri);
@@ -249,184 +374,651 @@ public class HomeActivity extends Activity {
         for (String[] g : GROUPS) grouped.put(g[0], new ArrayList<ResolveInfo>());
         grouped.put("More apps", new ArrayList<ResolveInfo>());
         for (ResolveInfo ri : apps.values()) grouped.get(groupFor(ri.activityInfo.packageName)).add(ri);
+        streamingApps.clear();
+        streamingApps.addAll(grouped.get("Streaming"));
 
+        JSONObject orders = json(KEY_ORDER);
         rowsBox.removeAllViews();
-        View first = null;
+        View first = null, restore = null;
         for (Map.Entry<String, List<ResolveInfo>> e : grouped.entrySet()) {
             List<ResolveInfo> list = e.getValue();
             if (list.isEmpty()) continue;
-            Collections.sort(list, (a, b) -> label(a).compareToIgnoreCase(label(b)));
+            final JSONArray saved = orders.optJSONArray(e.getKey());
+            Collections.sort(list, (a, b) -> {
+                int ia = indexIn(saved, a.activityInfo.packageName), ib = indexIn(saved, b.activityInfo.packageName);
+                if (ia != ib) return Integer.compare(ia, ib);
+                return label(a).compareToIgnoreCase(label(b));
+            });
             LinearLayout row = addRow(e.getKey());
+            boolean topRow = first == null;
             for (ResolveInfo ri : list) {
                 View tile = appTile(ri);
                 row.addView(tile);
-                if (first == null) first = tile;
+                View card = ((ViewGroup) tile).getChildAt(0);
+                if (topRow) card.setNextFocusUpId(addButtonId); // Up from top row -> + Add
+                if (first == null) first = card;
+                if (ri.activityInfo.packageName.equals(focusPkg)) restore = card;
             }
         }
+
         LinearLayout sys = addRow("System");
-        sys.addView(actionTile("Settings", new Intent(Settings.ACTION_SETTINGS)));
-        sys.addView(actionTile("Wi-Fi", new Intent(Settings.ACTION_WIFI_SETTINGS)));
-        sys.addView(actionTile("All apps", new Intent(Settings.ACTION_APPLICATION_SETTINGS)));
-        if (first != null) first.requestFocus();
+        sys.addView(actionTile("⚙", "Settings", new Intent(Settings.ACTION_SETTINGS)));
+        sys.addView(actionTile("📶", "Wi-Fi", new Intent(Settings.ACTION_WIFI_SETTINGS)));
+        sys.addView(actionTile("▦", "All apps", new Intent(Settings.ACTION_APPLICATION_SETTINGS)));
+        View themeBox = actionTile("🎨", "Theme", null);
+        themeTile = (TextView) ((ViewGroup) cardOf(themeBox).getChildAt(0)).getChildAt(1);
+        ((ViewGroup) themeBox).getChildAt(0).setOnClickListener(v -> {
+            prefs().edit().putInt(KEY_THEME, prefs().getInt(KEY_THEME, 0) + 1).apply();
+            applyTheme();
+        });
+        sys.addView(themeBox);
+        updateThemeLabel();
+
+        View target = restore != null ? restore : first;
+        if (target != null) target.requestFocus();
+    }
+
+    private static int indexIn(JSONArray a, String pkg) {
+        if (a != null) for (int i = 0; i < a.length(); i++) if (pkg.equals(a.optString(i))) return i;
+        return Integer.MAX_VALUE;
     }
 
     private String groupFor(String pkg) {
         String p = pkg.toLowerCase(Locale.ROOT).replace("_", "");
-        for (String[] g : GROUPS) {
-            for (int i = 1; i < g.length; i++) if (p.contains(g[i])) return g[0];
-        }
+        for (String[] g : GROUPS) for (int i = 1; i < g.length; i++) if (p.contains(g[i])) return g[0];
         return "More apps";
     }
 
     private String label(ResolveInfo ri) { return String.valueOf(ri.loadLabel(getPackageManager())); }
 
     private LinearLayout addRow(String title) {
-        TextView t = text(title, 16, MUTED, true);
-        t.setPadding(px(4), px(10), 0, px(6));
+        TextView t = ui.text(title, 17, Ui.WHITE, Ui.MEDIUM);
+        t.setPadding(ui.px(4), ui.px(12), 0, ui.px(2));
         rowsBox.addView(t);
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
+        hs.setClipChildren(false); // zoomed tile may use the padding; rowsBox clips at hs bounds
         hs.setClipToPadding(false);
-        hs.setPadding(px(4), px(6), px(4), px(6));
+        hs.setPadding(ui.px(14), ui.px(12), ui.px(24), ui.px(12));
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setClipChildren(false);
+        row.setTag(title);
         hs.addView(row);
         rowsBox.addView(hs);
         return row;
     }
 
+    /** Tile = container(card + label). Card is the focusable part. */
+    private LinearLayout tileShell(String labelText) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        box.setClipChildren(false);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.rightMargin = ui.px(20);
+        box.setLayoutParams(lp);
+
+        FrameLayout card = new FrameLayout(this);
+        card.setFocusable(true);
+        card.setClickable(true);
+        card.setBackground(ui.glass(16));
+        card.setForeground(ui.focusRing(16));
+        card.setClipToOutline(true);
+        box.addView(card, new LinearLayout.LayoutParams(ui.px(164), ui.px(92)));
+
+        final TextView label = ui.text(labelText, 13, Ui.MUTED, Ui.REGULAR);
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        label.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(164), -2);
+        llp.topMargin = ui.px(10);
+        box.addView(label, llp);
+
+        card.setOnFocusChangeListener((v, has) -> {
+            float s = has ? 1.1f : 1f;
+            v.animate().scaleX(s).scaleY(s).translationY(has ? -ui.px(3) : 0).setDuration(140).start();
+            v.setElevation(has ? ui.px(10) : 0);
+            label.setTextColor(has ? Ui.WHITE : Ui.MUTED);
+            label.animate().translationY(has ? ui.px(5) : 0).setDuration(140).start();
+        });
+        return box;
+    }
+
     private View appTile(ResolveInfo ri) {
-        PackageManager pm = getPackageManager();
-        String pkg = ri.activityInfo.packageName;
+        final PackageManager pm = getPackageManager();
+        final String pkg = ri.activityInfo.packageName;
+        final String name = label(ri);
         Drawable banner = null;
         try {
-            banner = pm.getActivityBanner(new android.content.ComponentName(pkg, ri.activityInfo.name));
+            banner = pm.getActivityBanner(new ComponentName(pkg, ri.activityInfo.name));
             if (banner == null) banner = pm.getApplicationBanner(pkg);
         } catch (Exception ignored) { }
 
-        FrameLayout tile = baseTile();
+        final LinearLayout box = tileShell(name);
+        box.setTag(pkg);
+        FrameLayout card = (FrameLayout) box.getChildAt(0);
+        card.setTag(pkg);
+        ImageView iv = new ImageView(this);
         if (banner != null) {
-            ImageView iv = new ImageView(this);
             iv.setImageDrawable(banner);
-            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            tile.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
         } else {
-            LinearLayout col = new LinearLayout(this);
-            col.setOrientation(LinearLayout.VERTICAL);
-            col.setGravity(Gravity.CENTER);
-            ImageView iv = new ImageView(this);
             iv.setImageDrawable(ri.loadIcon(pm));
-            col.addView(iv, new LinearLayout.LayoutParams(px(40), px(40)));
-            TextView name = text(label(ri), 12, TEXT, false);
-            name.setGravity(Gravity.CENTER);
-            name.setMaxLines(1);
-            name.setPadding(px(6), px(4), px(6), 0);
-            col.addView(name);
-            tile.addView(col, new FrameLayout.LayoutParams(-1, -1));
+            card.addView(iv, new FrameLayout.LayoutParams(ui.px(54), ui.px(54), Gravity.CENTER));
         }
-        tile.setContentDescription(label(ri));
-        tile.setOnClickListener(v -> {
+        card.setContentDescription(name);
+        card.setOnFocusChangeListener(chain(card.getOnFocusChangeListener(), (v, has) -> { if (has) focusPkg = pkg; }));
+        card.setOnClickListener(v -> {
             Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
             if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
             if (launch != null) safeStart(launch);
         });
-        return tile;
-    }
-
-    private View actionTile(String title, Intent intent) {
-        FrameLayout tile = baseTile();
-        TextView t = text(title, 15, TEXT, true);
-        t.setGravity(Gravity.CENTER);
-        tile.addView(t, new FrameLayout.LayoutParams(-1, -1));
-        tile.setOnClickListener(v -> safeStart(intent));
-        return tile;
-    }
-
-    private FrameLayout baseTile() {
-        FrameLayout tile = new FrameLayout(this);
-        tile.setFocusable(true);
-        tile.setClickable(true);
-        tile.setPadding(px(3), px(3), px(3), px(3));
-        tile.setBackground(rounded(CARD, 10, 0));
-        tile.setOnFocusChangeListener((v, has) -> {
-            v.setBackground(has ? rounded(CARD_FOCUS, 10, ACCENT) : rounded(CARD, 10, 0));
-            v.animate().scaleX(has ? 1.08f : 1f).scaleY(has ? 1.08f : 1f).setDuration(120).start();
-            v.setElevation(has ? px(8) : 0);
+        card.setOnLongClickListener(v -> { showAppMenu(pkg, name, box); return true; });
+        card.setOnKeyListener((v, code, ev) -> {
+            if (code == KeyEvent.KEYCODE_MENU && ev.getAction() == KeyEvent.ACTION_UP) { showAppMenu(pkg, name, box); return true; }
+            return false;
         });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(148), px(84));
-        lp.rightMargin = px(14);
-        tile.setLayoutParams(lp);
-        return tile;
+        return box;
+    }
+
+    private static View.OnFocusChangeListener chain(View.OnFocusChangeListener a, View.OnFocusChangeListener b) {
+        return (v, has) -> { if (a != null) a.onFocusChange(v, has); b.onFocusChange(v, has); };
+    }
+
+    private View actionTile(String icon, String title, Intent intent) {
+        LinearLayout box = tileShell(title);
+        FrameLayout card = (FrameLayout) box.getChildAt(0);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER);
+        TextView ic = ui.text(icon, 26, Ui.WHITE, Ui.REGULAR);
+        ic.setGravity(Gravity.CENTER);
+        col.addView(ic);
+        TextView t = ui.text(title, 13, Ui.SOFT, Ui.MEDIUM);
+        t.setGravity(Gravity.CENTER);
+        addWithTop(col, t, 6);
+        card.removeAllViews();
+        card.addView(col, new FrameLayout.LayoutParams(-1, -1));
+        // the card holds the icon+title, so hide the duplicate label under it
+        box.getChildAt(1).setVisibility(View.INVISIBLE);
+        if (intent != null) card.setOnClickListener(v -> safeStart(intent));
+        // expose: box(0)=card, card(0)=col, col(1)=title
+        return box;
     }
 
     private void safeStart(Intent i) {
         try {
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(i);
-        } catch (ActivityNotFoundException | SecurityException ignored) { }
+        } catch (ActivityNotFoundException | SecurityException e) {
+            Toast.makeText(this, "Can't open that here", Toast.LENGTH_SHORT).show();
+        }
     }
 
-    // ---------------------------------------------------------------- subscriptions
+    // =================================================================== app menu + reordering
+
+    private void showAppMenu(final String pkg, String name, final View box) {
+        LinearLayout panel = panel();
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        try {
+            ImageView iv = new ImageView(this);
+            iv.setImageDrawable(getPackageManager().getApplicationIcon(pkg));
+            head.addView(iv, new LinearLayout.LayoutParams(ui.px(40), ui.px(40)));
+        } catch (Exception ignored) { }
+        TextView title = ui.text(name, 22, Ui.WHITE, Ui.MEDIUM);
+        title.setPadding(ui.px(14), 0, 0, 0);
+        head.addView(title);
+        panel.addView(head);
+
+        final Dialog d = dialog(panel);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(300), -2);
+        llp.topMargin = ui.px(18);
+        panel.addView(list, llp);
+
+        View open = menuButton(list, "▶   Open", () -> {
+            Intent launch = getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
+            if (launch == null) launch = getPackageManager().getLaunchIntentForPackage(pkg);
+            if (launch != null) safeStart(launch);
+        }, d);
+        menuButton(list, "⇆   Move left / right", () -> startMove(box), d);
+        menuButton(list, "⇤   Move to start", () -> moveToEdge(box, true), d);
+        menuButton(list, "⇥   Move to end", () -> moveToEdge(box, false), d);
+        menuButton(list, "ⓘ   App info", () -> safeStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg))), d);
+        menuButton(list, "✕   Cancel", null, d);
+        d.show();
+        open.requestFocus();
+    }
+
+    private View menuButton(LinearLayout list, String text, final Runnable action, final Dialog d) {
+        TextView b = ui.button(text, false);
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        b.setOnClickListener(v -> { d.dismiss(); if (action != null) action.run(); });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = ui.px(8);
+        list.addView(b, lp);
+        return b;
+    }
+
+    private FrameLayout cardOf(View box) { return (FrameLayout) ((ViewGroup) box).getChildAt(0); }
+
+    private void startMove(View box) {
+        moving = box;
+        cardOf(box).setForeground(ui.moveRing(16));
+        hintBar.setText("◀  ▶   move app        OK   done");
+        hintBar.setVisibility(View.VISIBLE);
+        cardOf(box).requestFocus();
+    }
+
+    private void moveBy(int delta) {
+        ViewGroup row = (ViewGroup) moving.getParent();
+        int from = row.indexOfChild(moving), to = from + delta;
+        if (to < 0 || to >= row.getChildCount()) return;
+        row.removeView(moving);
+        row.addView(moving, to);
+        cardOf(moving).requestFocus();
+        saveRowOrder(row);
+    }
+
+    private void moveToEdge(View box, boolean start) {
+        ViewGroup row = (ViewGroup) box.getParent();
+        row.removeView(box);
+        if (start) row.addView(box, 0); else row.addView(box);
+        saveRowOrder(row);
+        cardOf(box).requestFocus();
+    }
+
+    private void endMove() {
+        cardOf(moving).setForeground(ui.focusRing(16));
+        moving = null;
+        hintBar.setVisibility(View.GONE);
+        Toast.makeText(this, "Order saved", Toast.LENGTH_SHORT).show();
+    }
+
+    private void saveRowOrder(ViewGroup row) {
+        try {
+            JSONArray a = new JSONArray();
+            for (int i = 0; i < row.getChildCount(); i++) {
+                Object tag = row.getChildAt(i).getTag();
+                if (tag instanceof String) a.put(tag);
+            }
+            JSONObject orders = json(KEY_ORDER);
+            orders.put(String.valueOf(row.getTag()), a);
+            putJson(KEY_ORDER, orders);
+        } catch (Exception ignored) { }
+    }
+
+    // =================================================================== subscriptions
+
+    /** Monthly/yearly plans roll forward automatically once their date has passed. */
+    private static LocalDate effectiveDate(JSONObject o, LocalDate today) {
+        LocalDate d = LocalDate.parse(o.optString("expires"));
+        String rep = o.optString("repeat", "once");
+        int guard = 0;
+        while (d.isBefore(today) && guard++ < 1000) {
+            if ("monthly".equals(rep)) d = d.plusMonths(1);
+            else if ("yearly".equals(rep)) d = d.plusYears(1);
+            else break;
+        }
+        return d;
+    }
 
     private void renderSubscriptions() {
         subsBox.removeAllViews();
-        JSONArray subs = config().optJSONArray("subscriptions");
-        if (subs == null || subs.length() == 0) {
-            TextView hint = text("No subscriptions yet.\nOn your PC run:\nscripts\\set-config.ps1", 13, MUTED, false);
-            hint.setPadding(0, px(10), 0, 0);
+        JSONArray subs = subscriptions();
+        final LocalDate today = LocalDate.now();
+        if (subs.length() == 0) {
+            subsSummary.setText("Nothing tracked yet");
+            TextView hint = ui.text("Track when your plans renew or expire.\nSelect  + Add  to start.", 13, Ui.SOFT, Ui.REGULAR);
+            hint.setLineSpacing(ui.px(3), 1f);
+            hint.setPadding(ui.px(2), ui.px(10), 0, ui.px(4));
             subsBox.addView(hint);
             return;
         }
-        List<JSONObject> items = new ArrayList<>();
-        for (int i = 0; i < subs.length(); i++) {
-            JSONObject o = subs.optJSONObject(i);
-            if (o != null) items.add(o);
-        }
-        Collections.sort(items, (a, b) -> a.optString("expires").compareTo(b.optString("expires")));
+        List<Integer> idx = new ArrayList<>();
+        for (int i = 0; i < subs.length(); i++) idx.add(i);
+        final JSONArray fs = subs;
+        Collections.sort(idx, (a, b) -> safeDate(fs.optJSONObject(a), today).compareTo(safeDate(fs.optJSONObject(b), today)));
 
-        LocalDate today = LocalDate.now();
+        int soon = 0;
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.getDefault());
-        for (JSONObject o : items) {
+        for (final int i : idx) {
+            JSONObject o = subs.optJSONObject(i);
+            if (o == null) continue;
             String name = o.optString("name", "?");
-            String when;
+            String rep = o.optString("repeat", "once");
             long days;
+            String when;
             try {
-                LocalDate exp = LocalDate.parse(o.optString("expires"));
-                days = ChronoUnit.DAYS.between(today, exp);
-                when = "Expires " + exp.format(fmt);
+                LocalDate d = effectiveDate(o, today);
+                days = ChronoUnit.DAYS.between(today, d);
+                when = ("once".equals(rep) ? "Expires " : "Renews ") + d.format(fmt);
             } catch (Exception e) {
                 days = Long.MIN_VALUE;
-                when = "Invalid date (use YYYY-MM-DD)";
+                when = "Set a date";
             }
+            if (days != Long.MIN_VALUE && days <= 7) soon++;
 
             LinearLayout line = new LinearLayout(this);
             line.setOrientation(LinearLayout.HORIZONTAL);
             line.setGravity(Gravity.CENTER_VERTICAL);
-            line.setPadding(0, px(10), 0, 0);
+            line.setFocusable(true);
+            line.setClickable(true);
+            line.setBackground(ui.glassItem(14));
+            line.setPadding(ui.px(10), ui.px(9), ui.px(10), ui.px(9));
+            line.setOnClickListener(v -> editSubscription(i));
 
-            LinearLayout left = new LinearLayout(this);
-            left.setOrientation(LinearLayout.VERTICAL);
-            left.addView(text(name, 14, TEXT, true));
-            left.addView(text(when, 11, MUTED, false));
-            line.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+            String pkg = o.optString("pkg", "");
+            if (!pkg.isEmpty()) {
+                try {
+                    ImageView iv = new ImageView(this);
+                    iv.setImageDrawable(getPackageManager().getApplicationIcon(pkg));
+                    LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ui.px(30), ui.px(30));
+                    ilp.rightMargin = ui.px(10);
+                    line.addView(iv, ilp);
+                } catch (Exception ignored) { }
+            }
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            TextView n = ui.text(name, 14, Ui.WHITE, Ui.MEDIUM);
+            n.setSingleLine(true);
+            n.setEllipsize(TextUtils.TruncateAt.END);
+            col.addView(n);
+            addWithTop(col, ui.text(when + ("once".equals(rep) ? "" : " · " + REPEAT_LABELS[repeatIndex(rep)]), 11, Ui.MUTED, Ui.REGULAR), 3);
+            line.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
 
             String pill;
             int color;
-            if (days == Long.MIN_VALUE) { pill = "?"; color = MUTED; }
-            else if (days < 0) { pill = "Expired"; color = RED; }
-            else if (days == 0) { pill = "Today"; color = RED; }
-            else if (days <= 3) { pill = days + "d"; color = RED; }
-            else if (days <= 14) { pill = days + "d"; color = AMBER; }
-            else { pill = days + "d"; color = GREEN; }
-            TextView p = text(pill, 12, 0xFF10161F, true);
-            p.setPadding(px(8), px(2), px(8), px(2));
-            p.setBackground(rounded(color, 10, 0));
+            if (days == Long.MIN_VALUE) { pill = "?"; color = 0x80FFFFFF; }
+            else if (days < 0) { pill = "Expired"; color = Ui.RED; }
+            else if (days == 0) { pill = "Today"; color = Ui.RED; }
+            else if (days <= 3) { pill = days + " d"; color = Ui.RED; }
+            else if (days <= 14) { pill = days + " d"; color = Ui.AMBER; }
+            else { pill = days + " d"; color = Ui.GREEN; }
+            TextView p = ui.text(pill, 12, Ui.INK, Ui.MEDIUM);
+            p.setShadowLayer(0, 0, 0, 0);
+            p.setPadding(ui.px(9), ui.px(4), ui.px(9), ui.px(4));
+            p.setBackground(ui.round(color, 12, 0, 0));
             line.addView(p);
-            subsBox.addView(line);
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = ui.px(8);
+            subsBox.addView(line, lp);
         }
+        subsSummary.setText(subs.length() + " tracked" + (soon > 0 ? " · " + soon + " due within a week" : " · all good"));
     }
 
-    // ---------------------------------------------------------------- weather
+    private static LocalDate safeDate(JSONObject o, LocalDate today) {
+        try { return effectiveDate(o, today); } catch (Exception e) { return LocalDate.MAX; }
+    }
+
+    private static int repeatIndex(String r) {
+        for (int i = 0; i < REPEATS.length; i++) if (REPEATS[i].equals(r)) return i;
+        return 0;
+    }
+
+    /** Add (index -1) or edit a subscription entirely with the TV remote. */
+    private void editSubscription(final int index) {
+        final JSONArray subs = subscriptions();
+        final JSONObject cur = index >= 0 ? subs.optJSONObject(index) : null;
+        final String[] pkgSel = {cur != null ? cur.optString("pkg", "") : ""};
+        final int[] repeat = {cur != null ? repeatIndex(cur.optString("repeat", "monthly")) : 1};
+        final LocalDate[] date = new LocalDate[1];
+        try { date[0] = cur != null ? LocalDate.parse(cur.optString("expires")) : LocalDate.now().plusMonths(1); }
+        catch (Exception e) { date[0] = LocalDate.now().plusMonths(1); }
+
+        LinearLayout panel = panel();
+        panel.addView(ui.text(cur == null ? "Add subscription" : "Edit subscription", 24, Ui.WHITE, Ui.MEDIUM));
+
+        // --- service picker
+        panel.addView(sectionLabel("Service"));
+        final EditText nameField = new EditText(this);
+        HorizontalScrollView chipsScroll = new HorizontalScrollView(this);
+        chipsScroll.setHorizontalScrollBarEnabled(false);
+        chipsScroll.setClipToPadding(false);
+        final LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setPadding(0, ui.px(4), 0, ui.px(4));
+        chipsScroll.addView(chips);
+        View firstChip = null;
+        for (final ResolveInfo ri : streamingApps) {
+            final String pkg = ri.activityInfo.packageName;
+            final String lbl = label(ri);
+            final TextView chip = ui.button(lbl, false);
+            chip.setTextSize(13);
+            chip.setPadding(ui.px(14), ui.px(8), ui.px(14), ui.px(8));
+            chip.setSelected(pkg.equals(pkgSel[0]));
+            chip.setOnClickListener(v -> {
+                for (int k = 0; k < chips.getChildCount(); k++) chips.getChildAt(k).setSelected(false);
+                chip.setSelected(true);
+                pkgSel[0] = pkg;
+                nameField.setText(lbl);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = ui.px(8);
+            chips.addView(chip, lp);
+            if (firstChip == null) firstChip = chip;
+        }
+        panel.addView(chipsScroll, new LinearLayout.LayoutParams(ui.px(640), -2));
+
+        nameField.setText(cur != null ? cur.optString("name") : "");
+        nameField.setHint("…or type a name, e.g. Netflix Premium");
+        nameField.setSingleLine(true);
+        nameField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        nameField.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        // Don't pop the keyboard just by passing over the field; open it only on OK.
+        nameField.setShowSoftInputOnFocus(false);
+        nameField.setOnKeyListener((v, code, ev) -> {
+            if ((code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) && ev.getAction() == KeyEvent.ACTION_UP) {
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null) imm.showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_FORCED);
+                return true;
+            }
+            return false;
+        });
+        nameField.setTextColor(Ui.WHITE);
+        nameField.setHintTextColor(0x80FFFFFF);
+        nameField.setTextSize(16);
+        nameField.setPadding(ui.px(16), ui.px(10), ui.px(16), ui.px(10));
+        nameField.setBackground(ui.glassItem(14));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(ui.px(640), -2);
+        nlp.topMargin = ui.px(8);
+        panel.addView(nameField, nlp);
+
+        // --- date
+        panel.addView(sectionLabel("Expires / renews on"));
+        LinearLayout dateRow = new LinearLayout(this);
+        dateRow.setOrientation(LinearLayout.HORIZONTAL);
+        dateRow.setGravity(Gravity.CENTER_VERTICAL);
+        final TextView summary = ui.text("", 14, Ui.SOFT, Ui.REGULAR);
+        final TextView[] values = new TextView[3];
+        final Runnable refresh = () -> {
+            values[0].setText(String.valueOf(date[0].getDayOfMonth()));
+            values[1].setText(date[0].getMonth().getDisplayName(TextStyle.SHORT, Locale.getDefault()));
+            values[2].setText(String.valueOf(date[0].getYear()));
+            long dd = ChronoUnit.DAYS.between(LocalDate.now(), date[0]);
+            String dow = date[0].getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.getDefault());
+            summary.setText(dow + " · " + (dd == 0 ? "today" : dd > 0 ? "in " + dd + " days" : (-dd) + " days ago"));
+        };
+        String[] names = {"Day", "Month", "Year"};
+        // OK on a field starts editing it (gold); ▲▼ then change the value; OK again (or leaving) stops.
+        final int[] editing = {-1};
+        final View[] steppers = new View[3];
+        for (int k = 0; k < 3; k++) {
+            final int field = k;
+            final LinearLayout st = new LinearLayout(this);
+            steppers[k] = st;
+            st.setOrientation(LinearLayout.VERTICAL);
+            st.setGravity(Gravity.CENTER);
+            st.setFocusable(true);
+            st.setClickable(true);
+            st.setBackground(ui.glassItem(14));
+            st.setOnClickListener(v -> {
+                editing[0] = editing[0] == field ? -1 : field;
+                for (int j = 0; j < 3; j++) steppers[j].setSelected(editing[0] == j);
+            });
+            st.setOnFocusChangeListener((v, has) -> {
+                if (!has && editing[0] == field) { editing[0] = -1; v.setSelected(false); }
+            });
+            st.setPadding(ui.px(8), ui.px(4), ui.px(8), ui.px(6));
+            TextView up = ui.text("▲", 11, Ui.MUTED, Ui.REGULAR);
+            values[k] = ui.text("", 24, Ui.WHITE, Ui.MEDIUM);
+            TextView dn = ui.text("▼", 11, Ui.MUTED, Ui.REGULAR);
+            TextView cap = ui.text(names[k], 10, Ui.MUTED, Ui.REGULAR);
+            st.addView(cap);
+            st.addView(up);
+            addWithTop(st, values[k], 2);
+            addWithTop(st, dn, 2);
+            st.setOnKeyListener((v, code, ev) -> {
+                if (editing[0] != field) return false; // not editing: arrows navigate normally
+                if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) return true; // stay put while editing
+                if (ev.getAction() != KeyEvent.ACTION_DOWN) return code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN;
+                int step = code == KeyEvent.KEYCODE_DPAD_UP ? 1 : code == KeyEvent.KEYCODE_DPAD_DOWN ? -1 : 0;
+                if (step == 0) return false;
+                date[0] = field == 0 ? date[0].plusDays(step) : field == 1 ? date[0].plusMonths(step) : date[0].plusYears(step);
+                refresh.run();
+                return true;
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ui.px(k == 2 ? 96 : 80), -2);
+            lp.rightMargin = ui.px(10);
+            dateRow.addView(st, lp);
+        }
+        View spacer = new View(this);
+        dateRow.addView(spacer, new LinearLayout.LayoutParams(ui.px(10), 1));
+        String[][] quick = {{"+1 month", "M1"}, {"+3 months", "M3"}, {"+1 year", "Y1"}};
+        for (final String[] q : quick) {
+            TextView b = ui.button(q[0], false);
+            b.setTextSize(13);
+            b.setOnClickListener(v -> {
+                date[0] = q[1].equals("Y1") ? date[0].plusYears(1) : date[0].plusMonths(q[1].equals("M3") ? 3 : 1);
+                refresh.run();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = ui.px(8);
+            dateRow.addView(b, lp);
+        }
+        LinearLayout.LayoutParams drlp = new LinearLayout.LayoutParams(-2, -2);
+        drlp.topMargin = ui.px(4);
+        panel.addView(dateRow, drlp);
+        addWithTop(panel, summary, 8);
+        addWithTop(panel, ui.text("Tip: press OK on Day / Month / Year, change with ▲ ▼, press OK again", 12, Ui.MUTED, Ui.REGULAR), 4);
+        refresh.run();
+
+        // --- repeat
+        panel.addView(sectionLabel("Repeats"));
+        final LinearLayout repRow = new LinearLayout(this);
+        repRow.setOrientation(LinearLayout.HORIZONTAL);
+        for (int k = 0; k < REPEATS.length; k++) {
+            final int r = k;
+            final TextView b = ui.button(REPEAT_LABELS[k], false);
+            b.setTextSize(13);
+            b.setSelected(repeat[0] == k);
+            b.setOnClickListener(v -> {
+                repeat[0] = r;
+                for (int j = 0; j < repRow.getChildCount(); j++) repRow.getChildAt(j).setSelected(j == r);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = ui.px(8);
+            repRow.addView(b, lp);
+        }
+        TextView repHint = ui.text("   Monthly / Yearly roll forward by themselves", 12, Ui.MUTED, Ui.REGULAR);
+        repRow.addView(repHint);
+        repRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rrlp = new LinearLayout.LayoutParams(-2, -2);
+        rrlp.topMargin = ui.px(4);
+        panel.addView(repRow, rrlp);
+
+        // --- actions
+        final Dialog d = dialog(panel);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        TextView save = ui.button("Save", true);
+        save.setId(View.generateViewId());
+        for (int j = 0; j < repRow.getChildCount(); j++) repRow.getChildAt(j).setNextFocusDownId(save.getId());
+        save.setOnClickListener(v -> {
+            String name = nameField.getText().toString().trim();
+            if (name.isEmpty()) {
+                Toast.makeText(this, "Pick a service or type a name", Toast.LENGTH_SHORT).show();
+                nameField.requestFocus();
+                return;
+            }
+            try {
+                JSONObject o = new JSONObject();
+                o.put("name", name);
+                o.put("expires", date[0].toString());
+                o.put("repeat", REPEATS[repeat[0]]);
+                if (!pkgSel[0].isEmpty()) o.put("pkg", pkgSel[0]);
+                if (index >= 0) subs.put(index, o); else subs.put(o);
+                saveSubscriptions(subs);
+            } catch (Exception ignored) { }
+            d.dismiss();
+            renderSubscriptions();
+        });
+        actions.addView(save, buttonLp());
+        if (index >= 0) {
+            TextView del = ui.button("Delete", false);
+            del.setOnClickListener(v -> {
+                subs.remove(index);
+                saveSubscriptions(subs);
+                d.dismiss();
+                renderSubscriptions();
+            });
+            actions.addView(del, buttonLp());
+        }
+        TextView cancel = ui.button("Cancel", false);
+        cancel.setOnClickListener(v -> d.dismiss());
+        actions.addView(cancel, buttonLp());
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, -2);
+        alp.topMargin = ui.px(22);
+        panel.addView(actions, alp);
+
+        d.show();
+        if (cur == null && firstChip != null) firstChip.requestFocus(); else save.requestFocus();
+    }
+
+    private LinearLayout.LayoutParams buttonLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.rightMargin = ui.px(10);
+        return lp;
+    }
+
+    private TextView sectionLabel(String s) {
+        TextView t = ui.text(s.toUpperCase(Locale.getDefault()), 11, Ui.MUTED, Ui.MEDIUM);
+        t.setLetterSpacing(0.12f);
+        t.setPadding(0, ui.px(18), 0, ui.px(6));
+        return t;
+    }
+
+    // =================================================================== dialogs
+
+    private LinearLayout panel() {
+        LinearLayout p = new LinearLayout(this);
+        p.setOrientation(LinearLayout.VERTICAL);
+        p.setBackground(ui.glassPanel(26));
+        p.setPadding(ui.px(30), ui.px(26), ui.px(30), ui.px(26));
+        return p;
+    }
+
+    private Dialog dialog(View content) {
+        Dialog d = new Dialog(this);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        d.setContentView(content);
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(0));
+            w.setDimAmount(0.6f);
+            w.setLayout(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        return d;
+    }
+
+    // =================================================================== weather
 
     private void loadWeather() {
         lastWeatherAt = System.currentTimeMillis();
@@ -435,9 +1027,8 @@ public class HomeActivity extends Activity {
             try {
                 if (Double.isNaN(lat)) {
                     if (!city.isEmpty()) {
-                        JSONObject g = getJson("https://geocoding-api.open-meteo.com/v1/search?count=1&name="
-                                + URLEncoder.encode(city, "UTF-8"));
-                        JSONObject r = g.getJSONArray("results").getJSONObject(0);
+                        JSONObject r = getJson("https://geocoding-api.open-meteo.com/v1/search?count=1&name="
+                                + URLEncoder.encode(city, "UTF-8")).getJSONArray("results").getJSONObject(0);
                         lat = r.getDouble("latitude");
                         lon = r.getDouble("longitude");
                         place = r.optString("name", city);
@@ -450,24 +1041,38 @@ public class HomeActivity extends Activity {
                 }
                 JSONObject w = getJson(String.format(Locale.US,
                         "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-                        + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m"
-                        + "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1", lat, lon));
+                        + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day"
+                        + "&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=4", lat, lon));
                 JSONObject cur = w.getJSONObject("current");
                 JSONObject daily = w.getJSONObject("daily");
                 int code = cur.optInt("weather_code");
-                final String main = weatherIcon(code) + "  " + Math.round(cur.getDouble("temperature_2m")) + "°";
-                final String desc = weatherText(code) + (place.isEmpty() ? "" : " · " + place);
-                final String extra = String.format(Locale.getDefault(),
-                        "Feels %d° · H %d° L %d° · Humidity %d%% · Wind %d km/h",
+                boolean day = cur.optInt("is_day", 1) == 1;
+                final String icon = weatherIcon(code, day);
+                final String temp = Math.round(cur.getDouble("temperature_2m")) + "°";
+                final String desc = weatherText(code) + (place.isEmpty() ? "" : "  ·  " + place);
+                final String extra = String.format(Locale.getDefault(), "Feels %d°   H %d°  L %d°   💧%d%%   💨%d km/h",
                         Math.round(cur.getDouble("apparent_temperature")),
                         Math.round(daily.getJSONArray("temperature_2m_max").getDouble(0)),
                         Math.round(daily.getJSONArray("temperature_2m_min").getDouble(0)),
                         cur.optInt("relative_humidity_2m"),
                         Math.round(cur.getDouble("wind_speed_10m")));
+                StringBuilder fc = new StringBuilder();
+                JSONArray times = daily.getJSONArray("time");
+                for (int i = 1; i < times.length(); i++) {
+                    DayOfWeek dow = LocalDate.parse(times.getString(i)).getDayOfWeek();
+                    if (fc.length() > 0) fc.append("     ");
+                    fc.append(dow.getDisplayName(TextStyle.SHORT, Locale.getDefault())).append(' ')
+                      .append(weatherIcon(daily.getJSONArray("weather_code").optInt(i), true)).append(' ')
+                      .append(Math.round(daily.getJSONArray("temperature_2m_max").getDouble(i))).append("°/")
+                      .append(Math.round(daily.getJSONArray("temperature_2m_min").getDouble(i))).append('°');
+                }
+                final String forecast = fc.toString();
                 runOnUiThread(() -> {
-                    weatherMain.setText(main);
+                    weatherIcon.setText(icon);
+                    weatherTemp.setText(temp);
                     weatherDesc.setText(desc);
                     weatherExtra.setText(extra);
+                    forecastView.setText(forecast);
                 });
             } catch (Exception e) {
                 lastWeatherAt = System.currentTimeMillis() - WEATHER_EVERY_MS + 2 * 60 * 1000L; // retry in 2 min
@@ -480,7 +1085,7 @@ public class HomeActivity extends Activity {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(8000);
         c.setReadTimeout(8000);
-        c.setRequestProperty("User-Agent", "AvyTvHome/1.0");
+        c.setRequestProperty("User-Agent", "AvyTvHome/1.1");
         try (BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
             StringBuilder sb = new StringBuilder();
             String line;
@@ -491,9 +1096,9 @@ public class HomeActivity extends Activity {
         }
     }
 
-    private static String weatherIcon(int c) {
-        if (c == 0) return "☀";
-        if (c <= 2) return "⛅";
+    private static String weatherIcon(int c, boolean day) {
+        if (c == 0) return day ? "☀" : "☾";
+        if (c <= 2) return day ? "⛅" : "☁";
         if (c == 3) return "☁";
         if (c == 45 || c == 48) return "🌫";
         if (c >= 95) return "⛈";
@@ -516,26 +1121,5 @@ public class HomeActivity extends Activity {
         if (c == 85 || c == 86) return "Snow showers";
         if (c >= 95) return "Thunderstorm";
         return "—";
-    }
-
-    // ---------------------------------------------------------------- helpers
-
-    private int px(float v) { return Math.round(v * dp); }
-
-    private TextView text(String s, float sp, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        return t;
-    }
-
-    private GradientDrawable rounded(int fill, float radiusDp, int stroke) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(fill);
-        d.setCornerRadius(radiusDp * dp);
-        if (stroke != 0) d.setStroke(px(2), stroke);
-        return d;
     }
 }
