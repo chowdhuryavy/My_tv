@@ -1,0 +1,10 @@
+﻿Snapshot taken: 2026-11-08 19:32
+Brand:          TCL
+Device:         G10 (Smart TV)
+Android:        12 (SDK 31)
+Build:          STT2.230203.001 release-keys
+CPU ABIs:       armeabi-v7a,armeabi
+Physical size: 3840x2160
+Override size: 1920x1080
+Physical density: 320
+MemTotal:        1807408 kB

@@ -1,0 +1,6 @@
+# Private: your city and subscription dates
+config/config.json
+
+# Build output and local signing key
+launcher/out/
+launcher/*.keystore

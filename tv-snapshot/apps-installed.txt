@@ -1,0 +1,17 @@
+﻿ahaflix.tv
+app.cricfy.tv
+com.app.bluesun
+com.apple.atve.androidtv.appletv
+com.blaze.sportzfy
+com.bstar.intl
+com.crunchyroll.crunchyroid
+com.esaba.downloader
+com.iqiyi.i18n.tv
+com.movieboxpro.androidtv
+com.navyoma.sendfilestotv
+com.osn.go
+com.parsifal.starz
+com.suntv.sunnxt
+com.tcl.browser
+com.vpn.super.unlimited.proxy.open.free
+net.mbc.shahidTV

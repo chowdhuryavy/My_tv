@@ -1,0 +1,8 @@
+{
+  "city": "",
+  "subscriptions": [
+    { "name": "Crunchyroll", "expires": "2026-12-31" },
+    { "name": "Shahid VIP",  "expires": "2027-01-15" },
+    { "name": "OSN+",        "expires": "2027-02-01" }
+  ]
+}
