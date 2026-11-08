@@ -94,6 +94,33 @@ final class Ui {
         return s;
     }
 
+    /**
+     * Some TV apps use a wide wordmark as their icon (Netflix shows "NETFLIX"). For those we
+     * draw a compact letter icon like the phone versions. Returns null when the app's own icon is fine.
+     */
+    Drawable iconOverride(String pkg) {
+        if ("com.netflix.ninja".equals(pkg)) return letterIcon("N", 0xFF000000, 0xFFE50914);
+        return null;
+    }
+
+    /** Square letter icon: bold condensed letter centred on a solid background (clipped round by the tile). */
+    Drawable letterIcon(String letter, int bg, int fg) {
+        int size = 192;
+        Bitmap b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas cv = new Canvas(b);
+        cv.drawColor(bg);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(fg);
+        p.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        p.setTextAlign(Paint.Align.CENTER);
+        p.setTextSize(size * 0.78f);
+        p.setTextScaleX(0.82f);       // narrower, taller letter
+        android.graphics.Rect r = new android.graphics.Rect();
+        p.getTextBounds(letter, 0, letter.length(), r);
+        cv.drawText(letter, size / 2f, size / 2f - r.exactCenterY(), p);
+        return new android.graphics.drawable.BitmapDrawable(c.getResources(), b);
+    }
+
     Drawable moveRing(float radiusDp) { return round(0x22FFD166, radiusDp, 3.5f, GOLD); }
 
     private GradientDrawable oval(int fill, float strokeDp, int stroke) {

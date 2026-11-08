@@ -774,7 +774,7 @@ public class HomeActivity extends Activity {
                 row.setPadding(ui.px(12), ui.px(7), ui.px(12), ui.px(7));
                 try {
                     ImageView iv = new ImageView(this);
-                    iv.setImageDrawable(pm.getApplicationIcon(app[1]));
+                    iv.setImageDrawable(appIcon(app[1]));
                     LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ui.px(30), ui.px(30));
                     ilp.rightMargin = ui.px(12);
                     row.addView(iv, ilp);
@@ -856,6 +856,12 @@ public class HomeActivity extends Activity {
     }
 
     private JSONObject buttonMap() { return json(KeyService.KEY_BUTTONS); }
+
+    /** App icon, with compact replacements for apps whose TV icon is a wide wordmark (e.g. Netflix). */
+    private Drawable appIcon(String pkg) throws PackageManager.NameNotFoundException {
+        Drawable o = ui.iconOverride(pkg);
+        return o != null ? o : getPackageManager().getApplicationIcon(pkg);
+    }
 
     private String appLabel(String pkg) {
         if (KeyService.QUICK.equals(pkg)) return "Quick settings";
@@ -1449,7 +1455,7 @@ public class HomeActivity extends Activity {
         // The app's own icon (not its TV banner), filling the whole disc and clipped to the
         // circle by the card's oval outline, so every icon sits neatly inside the round.
         Drawable icon;
-        try { icon = pm.getApplicationIcon(pkg); } catch (Exception e) { icon = ri.loadIcon(pm); }
+        try { icon = appIcon(pkg); } catch (Exception e) { icon = ri.loadIcon(pm); }
         ImageView iv = new ImageView(this);
         iv.setImageDrawable(icon);
         iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -1509,7 +1515,7 @@ public class HomeActivity extends Activity {
         head.setGravity(Gravity.CENTER_VERTICAL);
         try {
             ImageView iv = new ImageView(this);
-            iv.setImageDrawable(getPackageManager().getApplicationIcon(pkg));
+            iv.setImageDrawable(appIcon(pkg));
             head.addView(iv, new LinearLayout.LayoutParams(ui.px(40), ui.px(40)));
         } catch (Exception ignored) { }
         TextView title = ui.text(name, 22, Ui.WHITE, Ui.MEDIUM);
@@ -1811,7 +1817,7 @@ public class HomeActivity extends Activity {
             if (!pkg.isEmpty()) {
                 try {
                     ImageView iv = new ImageView(this);
-                    iv.setImageDrawable(getPackageManager().getApplicationIcon(pkg));
+                    iv.setImageDrawable(appIcon(pkg));
                     LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ui.px(20), ui.px(20));
                     ilp.rightMargin = ui.px(7);
                     line.addView(iv, ilp);
