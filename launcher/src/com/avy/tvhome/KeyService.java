@@ -19,6 +19,8 @@ import org.json.JSONObject;
 public class KeyService extends AccessibilityService {
 
     static final String TAG = "AvyKeys";
+    /** Built-in targets that aren't apps. */
+    static final String QUICK = "avy:quick", HOME = "avy:home";
     static final String KEY_BUTTONS = "buttons_json";
 
     /** While the "press a button" screen is open, keys go here instead. */
@@ -69,11 +71,13 @@ public class KeyService extends AccessibilityService {
      * Built-in mapping for this TCL remote's app buttons (key codes captured on the TV).
      * Anything set on the Remote buttons screen overrides these.
      */
-    static final int[][] DEFAULT_CODES = {{4062}, {4099}, {4065}};
+    static final int[][] DEFAULT_CODES = {{4062}, {4099}, {4065}, {KeyEvent.KEYCODE_NOTIFICATION}, {KeyEvent.KEYCODE_ALL_APPS}};
     static final String[] DEFAULT_PKGS = {
         "com.netflix.ninja",                     // 4062  Netflix button
         "com.amazon.amazonvideo.livingroom",     // 4099  Prime Video button (confirmed on the TV)
         "com.google.android.youtube.tv",         // 4065  YouTube button (confirmed on the TV)
+        QUICK,                                   // 83    Settings (gear) button: Google TV sends NOTIFICATION
+        HOME,                                    // 284   Apps button
     };
 
     static String defaultFor(int code) {
@@ -96,6 +100,7 @@ public class KeyService extends AccessibilityService {
     }
 
     private boolean installed(String pkg) {
+        if (pkg.startsWith("avy:")) return true;
         PackageManager pm = getPackageManager();
         if (pm.getLeanbackLaunchIntentForPackage(pkg) != null || pm.getLaunchIntentForPackage(pkg) != null) return true;
         Log.w(TAG, "  app not found: " + pkg);
@@ -126,6 +131,13 @@ public class KeyService extends AccessibilityService {
     }
 
     private void launch(String pkg) {
+        if (pkg.startsWith("avy:")) {
+            Intent home = new Intent(this, HomeActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            if (QUICK.equals(pkg)) home.putExtra("open", "quick");
+            try { startActivity(home); } catch (Exception ex) { Log.w(TAG, "open home failed", ex); }
+            return;
+        }
         PackageManager pm = getPackageManager();
         Intent i = pm.getLeanbackLaunchIntentForPackage(pkg);
         if (i == null) i = pm.getLaunchIntentForPackage(pkg);

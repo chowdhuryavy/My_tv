@@ -174,16 +174,23 @@ public class HomeActivity extends Activity {
             openButtonsPending = false;
             handler.postDelayed(this::showRemoteButtons, 500);
         }
+        if (openQuickPending) {
+            openQuickPending = false;
+            handler.postDelayed(this::showQuickSettings, 350);
+        }
     }
+
+    private boolean openQuickPending;
 
     /** Set when started from Accessibility → Configuration (ButtonsActivity). */
     private boolean openButtonsPending;
 
     private void checkOpenExtra(Intent i) {
-        if (i != null && "buttons".equals(i.getStringExtra("open"))) {
-            openButtonsPending = true;
-            i.removeExtra("open");
-        }
+        if (i == null) return;
+        String open = i.getStringExtra("open");
+        if ("buttons".equals(open)) openButtonsPending = true;
+        if ("quick".equals(open)) openQuickPending = true; // remote Settings button
+        i.removeExtra("open");
     }
 
     @Override
@@ -631,6 +638,8 @@ public class HomeActivity extends Activity {
     private JSONObject buttonMap() { return json(KeyService.KEY_BUTTONS); }
 
     private String appLabel(String pkg) {
+        if (KeyService.QUICK.equals(pkg)) return "Quick settings";
+        if (KeyService.HOME.equals(pkg)) return "Home screen";
         try { return String.valueOf(getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0))); }
         catch (Exception e) { return pkg; }
     }
@@ -693,6 +702,8 @@ public class HomeActivity extends Activity {
             case 4062: return "Netflix button";
             case 4099: return "Prime Video button";
             case 4065: return "YouTube button";
+            case KeyEvent.KEYCODE_NOTIFICATION: return "Settings button";
+            case KeyEvent.KEYCODE_ALL_APPS: return "Apps button";
             default:
                 String s = KeyEvent.keyCodeToString(code);
                 return s.startsWith("KEYCODE_") ? s.substring(8).replace('_', ' ') + " button" : "Button " + code;
@@ -1041,7 +1052,7 @@ public class HomeActivity extends Activity {
         box.setGravity(Gravity.CENTER_HORIZONTAL);
         box.setClipChildren(false);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.rightMargin = ui.px(14);
+        lp.rightMargin = ui.px(12);
         box.setLayoutParams(lp);
 
         FrameLayout card = new FrameLayout(this);
@@ -1052,12 +1063,12 @@ public class HomeActivity extends Activity {
         card.setClipToOutline(true);
         box.addView(card, new LinearLayout.LayoutParams(ui.px(TILE_W), ui.px(TILE_H)));
 
-        final TextView label = ui.text(labelText, 11, Ui.MUTED, Ui.REGULAR);
+        final TextView label = ui.text(labelText, 10, Ui.MUTED, Ui.REGULAR);
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
         label.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(TILE_W), -2);
-        llp.topMargin = ui.px(10);
+        llp.topMargin = ui.px(7);
         box.addView(label, llp);
 
         card.setOnFocusChangeListener((v, has) -> {
@@ -1093,7 +1104,7 @@ public class HomeActivity extends Activity {
             card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
         } else {
             iv.setImageDrawable(ri.loadIcon(pm));
-            card.addView(iv, new FrameLayout.LayoutParams(ui.px(40), ui.px(40), Gravity.CENTER));
+            card.addView(iv, new FrameLayout.LayoutParams(ui.px(30), ui.px(30), Gravity.CENTER));
         }
         card.setContentDescription(name);
         card.setOnFocusChangeListener(chain(card.getOnFocusChangeListener(), (v, has) -> { if (has) focusPkg = pkg; }));
@@ -1121,10 +1132,10 @@ public class HomeActivity extends Activity {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        TextView ic = ui.text(icon, 20, Ui.WHITE, Ui.REGULAR);
+        TextView ic = ui.text(icon, 16, Ui.WHITE, Ui.REGULAR);
         ic.setGravity(Gravity.CENTER);
         col.addView(ic);
-        TextView t = ui.text(title, 11, Ui.SOFT, Ui.MEDIUM);
+        TextView t = ui.text(title, 10, Ui.SOFT, Ui.MEDIUM);
         t.setGravity(Gravity.CENTER);
         addWithTop(col, t, 6);
         card.removeAllViews();
@@ -1195,7 +1206,7 @@ public class HomeActivity extends Activity {
 
     private FrameLayout cardOf(View box) { return (FrameLayout) ((ViewGroup) box).getChildAt(0); }
 
-    private static final int TILE_W = 124, TILE_H = 70; // smaller tiles: more apps per row
+    private static final int TILE_W = 100, TILE_H = 56; // smaller tiles: more apps per row
 
     private static final String ARRANGE_HINT = "Arrange apps:  select an app, press OK to pick it up        BACK  finish";
 
