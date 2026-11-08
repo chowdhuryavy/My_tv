@@ -72,8 +72,8 @@ public class KeyService extends AccessibilityService {
     static final int[][] DEFAULT_CODES = {{4062}, {4099}, {4065}};
     static final String[] DEFAULT_PKGS = {
         "com.netflix.ninja",                     // 4062  Netflix button
-        "com.google.android.youtube.tv",         // 4099  YouTube button
-        "com.amazon.amazonvideo.livingroom",     // 4065  Prime Video button
+        "com.amazon.amazonvideo.livingroom",     // 4099  Prime Video button (confirmed on the TV)
+        "com.google.android.youtube.tv",         // 4065  YouTube button (confirmed on the TV)
     };
 
     static String defaultFor(int code) {
@@ -112,15 +112,16 @@ public class KeyService extends AccessibilityService {
 
     static void resetAccidentalOffs(android.content.Context c) {
         SharedPreferences p = c.getSharedPreferences("tvhome", MODE_PRIVATE);
-        if (p.getBoolean("buttons_reset_v24", false)) return;
+        if (p.getBoolean("buttons_reset_v25", false)) return;
         try {
             JSONObject m = new JSONObject(p.getString(KEY_BUTTONS, "{}"));
             JSONObject clean = new JSONObject();
             for (java.util.Iterator<String> it = m.keys(); it.hasNext(); ) {
                 String k = it.next();
+                if (k.equals("4099") || k.equals("4065")) continue; // v2.5: codes were swapped, use corrected defaults
                 if (!m.optString(k).isEmpty()) clean.put(k, m.optString(k));
             }
-            p.edit().putString(KEY_BUTTONS, clean.toString()).putBoolean("buttons_reset_v24", true).apply();
+            p.edit().putString(KEY_BUTTONS, clean.toString()).putBoolean("buttons_reset_v25", true).apply();
         } catch (Exception ignored) { }
     }
 

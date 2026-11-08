@@ -25,6 +25,9 @@ Invoke-Adb shell pm disable-user --user 0 com.google.android.tungsten.setupwrait
 # Set the default only after the HOME candidates changed, otherwise it is ignored.
 Invoke-Adb shell cmd package set-home-activity com.avy.tvhome/.HomeActivity
 
+# The TV turns accessibility off on every update: switch the button helper back on.
+& "$PSScriptRootenable-buttons.ps1" -NoConnect
+
 # Press Home and confirm.
 Invoke-Adb shell input keyevent KEYCODE_HOME
 Start-Sleep 2

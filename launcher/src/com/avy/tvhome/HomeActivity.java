@@ -691,8 +691,8 @@ public class HomeActivity extends Activity {
     private static String buttonName(int code) {
         switch (code) {
             case 4062: return "Netflix button";
-            case 4099: return "YouTube button";
-            case 4065: return "Prime Video button";
+            case 4099: return "Prime Video button";
+            case 4065: return "YouTube button";
             default:
                 String s = KeyEvent.keyCodeToString(code);
                 return s.startsWith("KEYCODE_") ? s.substring(8).replace('_', ' ') + " button" : "Button " + code;

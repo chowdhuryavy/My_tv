@@ -23,7 +23,7 @@ The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB
 - **Profile avatar** (top right): select it, choose **Show my Google account**, and press **Allow**. The avatar then shows your account initial and the menu shows your Google email. You can also set a display name. The app targets SDK 25 on purpose: newer targets can't see Google accounts on Google TV without the stock launcher's picker.
 - **Remote app buttons** (Netflix, YouTube, Prime Video and others): Google TV normally handles these inside the stock launcher, which is disabled here. Avy TV Home includes a small accessibility service that handles them instead. It only sees button presses, never screen content. To set it up:
   1. Turn it on once in **Settings → Accessibility → Avy TV Home remote buttons**. The shortcut is in ⚙ → Remote buttons. **This TV switches accessibility off whenever the app is updated**, so after an update, switch the helper off and on once.
-  2. The Netflix (4062), YouTube (4099) and Prime Video (4065) buttons work out of the box. For other buttons, go to **⚙ → Remote buttons → Set up a button**, press the button, then pick the app. **Configuration** on the Accessibility page opens the same screen.
+  2. The Netflix (4062), YouTube (4065) and Prime Video (4099) buttons work out of the box. For other buttons, go to **⚙ → Remote buttons → Set up a button**, press the button, then pick the app. **Configuration** on the Accessibility page opens the same screen.
 
 ### Remote tips
 
