@@ -283,7 +283,7 @@ public class HomeActivity extends Activity {
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(ui.px(48), ui.px(26), ui.px(48), ui.px(8));
+        page.setPadding(ui.px(44), ui.px(20), ui.px(44), ui.px(6));
         page.setClipChildren(false);
         root.addView(page, new FrameLayout.LayoutParams(-1, -1));
 
@@ -298,7 +298,7 @@ public class HomeActivity extends Activity {
         LinearLayout clockRow = new LinearLayout(this);
         clockRow.setOrientation(LinearLayout.HORIZONTAL);
         clockRow.setBaselineAligned(true);
-        clockView = ui.text("", 58, Ui.WHITE, Ui.LIGHT);
+        clockView = ui.text("", 48, Ui.WHITE, Ui.LIGHT);
         ampmView = ui.text("", 20, Ui.SOFT, Ui.REGULAR);
         ampmView.setPadding(ui.px(8), 0, 0, 0);
         clockRow.addView(clockView);
@@ -318,13 +318,13 @@ public class HomeActivity extends Activity {
         weather.setGravity(Gravity.CENTER_VERTICAL);
         weather.setBackground(ui.glass(22));
         weather.setPadding(ui.px(22), ui.px(14), ui.px(24), ui.px(14));
-        weatherIcon = ui.text("⛅", 46, Ui.WHITE, Ui.REGULAR);
+        weatherIcon = ui.text("⛅", 38, Ui.WHITE, Ui.REGULAR);
         weather.addView(weatherIcon);
         LinearLayout wCol = new LinearLayout(this);
         wCol.setOrientation(LinearLayout.VERTICAL);
         wCol.setPadding(ui.px(16), 0, 0, 0);
-        weatherTemp = ui.text("--°", 34, Ui.WHITE, Ui.LIGHT);
-        weatherDesc = ui.text("Loading weather…", 15, Ui.WHITE, Ui.MEDIUM);
+        weatherTemp = ui.text("--°", 28, Ui.WHITE, Ui.LIGHT);
+        weatherDesc = ui.text("Loading weather…", 14, Ui.WHITE, Ui.MEDIUM);
         weatherExtra = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
         forecastView = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
         wCol.addView(weatherTemp);
@@ -440,7 +440,7 @@ public class HomeActivity extends Activity {
         LinearLayout.LayoutParams sslp = new LinearLayout.LayoutParams(-1, -2);
         sslp.topMargin = ui.px(8);
         subsCard.addView(subsScroll, sslp);
-        LinearLayout.LayoutParams sclp = new LinearLayout.LayoutParams(ui.px(290), -2);
+        LinearLayout.LayoutParams sclp = new LinearLayout.LayoutParams(ui.px(260), -2);
         sclp.leftMargin = ui.px(26);
         sclp.topMargin = ui.px(34);
         body.addView(subsCard, sclp);
@@ -616,9 +616,16 @@ public class HomeActivity extends Activity {
 
     // =================================================================== remote buttons
 
+    /** True only when the helper is actually running (enabled AND accessibility master switch on). */
     private boolean keyServiceOn() {
-        String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        return s != null && s.contains(getPackageName() + "/");
+        android.view.accessibility.AccessibilityManager am =
+                (android.view.accessibility.AccessibilityManager) getSystemService(ACCESSIBILITY_SERVICE);
+        if (am == null || !am.isEnabled()) return false;
+        for (android.accessibilityservice.AccessibilityServiceInfo info :
+                am.getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)) {
+            if (info.getId() != null && info.getId().startsWith(getPackageName() + "/")) return true;
+        }
+        return false;
     }
 
     private JSONObject buttonMap() { return json(KeyService.KEY_BUTTONS); }
@@ -632,8 +639,11 @@ public class HomeActivity extends Activity {
         LinearLayout panel = panel();
         panel.addView(ui.text("Remote buttons", 24, Ui.WHITE, Ui.MEDIUM));
         boolean on = keyServiceOn();
-        addWithTop(panel, ui.text(on ? "Choose which app each remote button opens."
-                : "The button helper is off. Turn on “Avy TV Home remote buttons” in Accessibility.", 13, Ui.SOFT, Ui.REGULAR), 6);
+        TextView status = ui.text(on ? "●  Helper running. Choose which app each remote button opens."
+                : "●  Helper NOT running, so app buttons won't work.\nIn Accessibility, switch “Avy TV Home remote buttons” OFF and then ON again.",
+                13, on ? Ui.GREEN : Ui.AMBER, Ui.REGULAR);
+        status.setLineSpacing(ui.px(3), 1f);
+        addWithTop(panel, status, 6);
         final Dialog d = dialog(panel);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -646,6 +656,19 @@ public class HomeActivity extends Activity {
             first = menuButton(list, "⚙   Open Accessibility settings", () -> safeStart(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)), d);
         } else {
             first = menuButton(list, "＋   Set up a button", this::learnButton, d);
+        }
+        // default-mapped buttons the user switched off, so they can be switched back on
+        for (int i = 0; i < KeyService.DEFAULT_CODES.length; i++) {
+            final String code = String.valueOf(KeyService.DEFAULT_CODES[i][0]);
+            JSONObject m0 = buttonMap();
+            if (m0.has(code) && m0.optString(code).isEmpty()) {
+                menuButton(list, "○   " + buttonName(KeyService.DEFAULT_CODES[i][0]) + " is off      (select to turn on)", () -> {
+                    JSONObject m = buttonMap();
+                    m.remove(code);
+                    putJson(KeyService.KEY_BUTTONS, m);
+                    showRemoteButtons();
+                }, d);
+            }
         }
         // effective mapping = built-in defaults, overridden by the user's choices ("" = off)
         JSONObject map = buttonMap();
@@ -926,7 +949,7 @@ public class HomeActivity extends Activity {
         sys.addView(arrangeBox, 0);
         updateThemeLabel();
 
-        TextView tip = ui.text("Tip: hold OK on any app (or press Menu) to move it   ·   or use  ⇄ Arrange apps  in System", 13, Ui.MUTED, Ui.REGULAR);
+        TextView tip = ui.text("Tip: hold OK on an app (or press Menu) to move it  ·  or use ⇄ Arrange apps in System", 12, Ui.MUTED, Ui.REGULAR);
         tip.setPadding(ui.px(6), ui.px(14), 0, ui.px(10));
         rowsBox.addView(tip);
 
@@ -948,14 +971,14 @@ public class HomeActivity extends Activity {
     private String label(ResolveInfo ri) { return String.valueOf(ri.loadLabel(getPackageManager())); }
 
     private LinearLayout addRow(String title) {
-        TextView t = ui.text(title, 17, Ui.WHITE, Ui.MEDIUM);
+        TextView t = ui.text(title, 15, Ui.WHITE, Ui.MEDIUM);
         t.setPadding(ui.px(4), ui.px(12), 0, ui.px(2));
         rowsBox.addView(t);
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
         hs.setClipChildren(false); // zoomed tile may use the padding; rowsBox clips at hs bounds
         hs.setClipToPadding(false);
-        hs.setPadding(ui.px(14), ui.px(12), ui.px(24), ui.px(12));
+        hs.setPadding(ui.px(12), ui.px(10), ui.px(20), ui.px(10));
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setClipChildren(false);
@@ -972,7 +995,7 @@ public class HomeActivity extends Activity {
         box.setGravity(Gravity.CENTER_HORIZONTAL);
         box.setClipChildren(false);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.rightMargin = ui.px(20);
+        lp.rightMargin = ui.px(14);
         box.setLayoutParams(lp);
 
         FrameLayout card = new FrameLayout(this);
@@ -981,13 +1004,13 @@ public class HomeActivity extends Activity {
         card.setBackground(ui.glass(16));
         card.setForeground(ui.focusRing(16));
         card.setClipToOutline(true);
-        box.addView(card, new LinearLayout.LayoutParams(ui.px(164), ui.px(92)));
+        box.addView(card, new LinearLayout.LayoutParams(ui.px(TILE_W), ui.px(TILE_H)));
 
-        final TextView label = ui.text(labelText, 13, Ui.MUTED, Ui.REGULAR);
+        final TextView label = ui.text(labelText, 11, Ui.MUTED, Ui.REGULAR);
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
         label.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(164), -2);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(TILE_W), -2);
         llp.topMargin = ui.px(10);
         box.addView(label, llp);
 
@@ -1024,7 +1047,7 @@ public class HomeActivity extends Activity {
             card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
         } else {
             iv.setImageDrawable(ri.loadIcon(pm));
-            card.addView(iv, new FrameLayout.LayoutParams(ui.px(54), ui.px(54), Gravity.CENTER));
+            card.addView(iv, new FrameLayout.LayoutParams(ui.px(40), ui.px(40), Gravity.CENTER));
         }
         card.setContentDescription(name);
         card.setOnFocusChangeListener(chain(card.getOnFocusChangeListener(), (v, has) -> { if (has) focusPkg = pkg; }));
@@ -1052,10 +1075,10 @@ public class HomeActivity extends Activity {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        TextView ic = ui.text(icon, 26, Ui.WHITE, Ui.REGULAR);
+        TextView ic = ui.text(icon, 20, Ui.WHITE, Ui.REGULAR);
         ic.setGravity(Gravity.CENTER);
         col.addView(ic);
-        TextView t = ui.text(title, 13, Ui.SOFT, Ui.MEDIUM);
+        TextView t = ui.text(title, 11, Ui.SOFT, Ui.MEDIUM);
         t.setGravity(Gravity.CENTER);
         addWithTop(col, t, 6);
         card.removeAllViews();
@@ -1125,6 +1148,8 @@ public class HomeActivity extends Activity {
     }
 
     private FrameLayout cardOf(View box) { return (FrameLayout) ((ViewGroup) box).getChildAt(0); }
+
+    private static final int TILE_W = 124, TILE_H = 70; // smaller tiles: more apps per row
 
     private static final String ARRANGE_HINT = "Arrange apps:  select an app, press OK to pick it up        BACK  finish";
 
