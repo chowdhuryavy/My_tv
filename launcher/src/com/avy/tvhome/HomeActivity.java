@@ -1104,10 +1104,14 @@ public class HomeActivity extends Activity {
         box.setTag(pkg);
         FrameLayout card = (FrameLayout) box.getChildAt(0);
         card.setTag(pkg);
+        // The app's own icon (not its TV banner), filling the whole disc and clipped to the
+        // circle by the card's oval outline, so every icon sits neatly inside the round.
+        Drawable icon;
+        try { icon = pm.getApplicationIcon(pkg); } catch (Exception e) { icon = ri.loadIcon(pm); }
         ImageView iv = new ImageView(this);
-        iv.setImageDrawable(ri.loadIcon(pm));
-        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        card.addView(iv, new FrameLayout.LayoutParams(ui.px(TILE_ICON), ui.px(TILE_ICON), Gravity.CENTER));
+        iv.setImageDrawable(icon);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
         card.setContentDescription(name);
         card.setOnFocusChangeListener(chain(card.getOnFocusChangeListener(), (v, has) -> { if (has) focusPkg = pkg; }));
         card.setOnClickListener(v -> {
