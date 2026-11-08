@@ -71,13 +71,14 @@ public class KeyService extends AccessibilityService {
      * Built-in mapping for this TCL remote's app buttons (key codes captured on the TV).
      * Anything set on the Remote buttons screen overrides these.
      */
-    static final int[][] DEFAULT_CODES = {{4062}, {4099}, {4065}, {KeyEvent.KEYCODE_NOTIFICATION}, {KeyEvent.KEYCODE_ALL_APPS}};
+    static final int[][] DEFAULT_CODES = {{4062}, {4099}, {4065}, {KeyEvent.KEYCODE_NOTIFICATION}, {KeyEvent.KEYCODE_ALL_APPS}, {4057}};
     static final String[] DEFAULT_PKGS = {
         "com.netflix.ninja",                     // 4062  Netflix button
         "com.amazon.amazonvideo.livingroom",     // 4099  Prime Video button (confirmed on the TV)
         "com.google.android.youtube.tv",         // 4065  YouTube button (confirmed on the TV)
         QUICK,                                   // 83    Settings (gear) button: Google TV sends NOTIFICATION
         HOME,                                    // 284   Apps button
+        "com.tcl.browser",                       // 4057  Web button (TCL) -> BrowseHere browser
     };
 
     static String defaultFor(int code) {
@@ -111,6 +112,15 @@ public class KeyService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        // This TV sometimes re-binds the service without the key-filter flag from the XML,
+        // and then no button reaches us. Request it explicitly every time we connect.
+        try {
+            android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
+            if (info != null) {
+                info.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+                setServiceInfo(info);
+            }
+        } catch (Exception ex) { Log.w(TAG, "could not request key events", ex); }
         resetAccidentalOffs(this);
         Log.i(TAG, "helper connected");
     }

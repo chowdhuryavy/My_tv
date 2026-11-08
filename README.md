@@ -14,7 +14,7 @@ The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB
   - Monthly and yearly plans roll their date forward automatically, so you only enter them once.
   - The badge shows the days left: green, amber (14 days or less) or red (3 days or less, or expired).
   - Select a subscription to edit or delete it.
-- **Apps in rows:** Streaming, Sports & Live, Tools, More apps and System.
+- **Apps in rows of small round icons** (about ten per row): Streaming, Sports & Live, Tools, More apps and System. The header is one slim line (clock, compact weather chip, ⚙, avatar), and subscriptions are a single strip of chips, so nothing covers the apps. Select the weather chip for the full forecast.
 - **Reordering apps**, and the order is remembered. There are two ways:
   - **One app:** hold **OK** on it (or press **Menu**), choose **Move left / right**, use ◀ ▶ to slide it (it wiggles while the other apps move aside), then press **OK** to drop it. *Move to start* and *Move to end* are in the same menu.
   - **Several apps:** in the System row, open **⇄ Arrange apps**. For each app, press **OK** to pick it up, ◀ ▶ to move it and **OK** to drop it, then press **Back** when you're done.
@@ -23,7 +23,7 @@ The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB
 - **Profile avatar** (top right): select it, choose **Show my Google account**, and press **Allow**. The avatar then shows your account initial and the menu shows your Google email. You can also set a display name. The app targets SDK 25 on purpose: newer targets can't see Google accounts on Google TV without the stock launcher's picker.
 - **Remote app buttons** (Netflix, YouTube, Prime Video and others): Google TV normally handles these inside the stock launcher, which is disabled here. Avy TV Home includes a small accessibility service that handles them instead. It only sees button presses, never screen content. To set it up:
   1. Turn it on once in **Settings → Accessibility → Avy TV Home remote buttons**. The shortcut is in ⚙ → Remote buttons. **This TV switches accessibility off whenever the app is updated**, so after an update, switch the helper off and on once.
-  2. The Netflix (4062), YouTube (4065) and Prime Video (4099) buttons work out of the box, the Settings button (Google TV sends NOTIFICATION, 83) opens ⚙ Quick settings, and an Apps button (284) goes to the home screen. For other buttons, go to **⚙ → Remote buttons → Set up a button**, press the button, then pick the app. **Configuration** on the Accessibility page opens the same screen.
+  2. The Netflix (4062), YouTube (4065) and Prime Video (4099) buttons work out of the box, the Settings button (Google TV sends NOTIFICATION, 83) opens ⚙ Quick settings, an Apps button (284) goes to the home screen, and the Web button (4057) opens the BrowseHere browser. For other buttons, go to **⚙ → Remote buttons → Set up a button**, press the button, then pick the app. **Configuration** on the Accessibility page opens the same screen.
 
 ### Remote tips
 

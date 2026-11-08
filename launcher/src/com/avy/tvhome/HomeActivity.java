@@ -291,54 +291,60 @@ public class HomeActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(ui.px(44), ui.px(20), ui.px(44), ui.px(6));
-        page.setClipChildren(false);
+        page.setClipChildren(true); // keep scrolled app rows from drawing over the header
         root.addView(page, new FrameLayout.LayoutParams(-1, -1));
 
-        // ---- header
+        // ---- slim header: [clock  greeting/date] .......... [weather chip] [⚙] [avatar]
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
         LinearLayout timeCol = new LinearLayout(this);
-        timeCol.setOrientation(LinearLayout.VERTICAL);
-        greeting = ui.text("", 17, Ui.SOFT, Ui.REGULAR);
+        timeCol.setOrientation(LinearLayout.HORIZONTAL);
+        timeCol.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout clockRow = new LinearLayout(this);
         clockRow.setOrientation(LinearLayout.HORIZONTAL);
         clockRow.setBaselineAligned(true);
-        clockView = ui.text("", 48, Ui.WHITE, Ui.LIGHT);
-        ampmView = ui.text("", 20, Ui.SOFT, Ui.REGULAR);
-        ampmView.setPadding(ui.px(8), 0, 0, 0);
+        clockView = ui.text("", 36, Ui.WHITE, Ui.LIGHT);
+        ampmView = ui.text("", 14, Ui.SOFT, Ui.REGULAR);
+        ampmView.setPadding(ui.px(5), 0, 0, 0);
         clockRow.addView(clockView);
         clockRow.addView(ampmView);
-        dateView = ui.text("", 17, Ui.SOFT, Ui.REGULAR);
-        timeCol.addView(greeting);
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-2, -2);
-        clp.topMargin = ui.px(4);
-        timeCol.addView(clockRow, clp);
-        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
-        dlp.topMargin = ui.px(6);
-        timeCol.addView(dateView, dlp);
+        timeCol.addView(clockRow);
+        LinearLayout gd = new LinearLayout(this);
+        gd.setOrientation(LinearLayout.VERTICAL);
+        gd.setPadding(ui.px(16), 0, 0, 0);
+        greeting = ui.text("", 14, Ui.WHITE, Ui.MEDIUM);
+        greeting.setSingleLine(true);
+        greeting.setEllipsize(TextUtils.TruncateAt.END);
+        dateView = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
+        gd.addView(greeting);
+        addWithTop(gd, dateView, 3);
+        timeCol.addView(gd, new LinearLayout.LayoutParams(ui.px(420), -2)); // room for 'Good afternoon, <name>'
         header.addView(timeCol, new LinearLayout.LayoutParams(0, -2, 1));
 
+        // compact weather chip; select it for the full forecast
         LinearLayout weather = new LinearLayout(this);
         weather.setOrientation(LinearLayout.HORIZONTAL);
         weather.setGravity(Gravity.CENTER_VERTICAL);
-        weather.setBackground(ui.glass(22));
-        weather.setPadding(ui.px(22), ui.px(14), ui.px(24), ui.px(14));
-        weatherIcon = ui.text("⛅", 38, Ui.WHITE, Ui.REGULAR);
+        weather.setFocusable(true);
+        weather.setClickable(true);
+        weather.setBackground(ui.glassItem(22));
+        weather.setPadding(ui.px(14), ui.px(6), ui.px(16), ui.px(6));
+        weatherIcon = ui.text("⛅", 20, Ui.WHITE, Ui.REGULAR);
         weather.addView(weatherIcon);
-        LinearLayout wCol = new LinearLayout(this);
-        wCol.setOrientation(LinearLayout.VERTICAL);
-        wCol.setPadding(ui.px(16), 0, 0, 0);
-        weatherTemp = ui.text("--°", 28, Ui.WHITE, Ui.LIGHT);
-        weatherDesc = ui.text("Loading weather…", 14, Ui.WHITE, Ui.MEDIUM);
-        weatherExtra = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
-        forecastView = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
-        wCol.addView(weatherTemp);
-        addWithTop(wCol, weatherDesc, 4);
-        addWithTop(wCol, weatherExtra, 4);
-        addWithTop(wCol, forecastView, 4);
-        weather.addView(wCol);
+        weatherTemp = ui.text("--°", 20, Ui.WHITE, Ui.LIGHT);
+        weatherTemp.setPadding(ui.px(8), 0, ui.px(10), 0);
+        weather.addView(weatherTemp);
+        weatherDesc = ui.text("Loading weather…", 12, Ui.SOFT, Ui.REGULAR);
+        weatherDesc.setSingleLine(true);
+        weatherDesc.setMaxWidth(ui.px(220));
+        weatherDesc.setEllipsize(TextUtils.TruncateAt.END);
+        weather.addView(weatherDesc);
+        // details live in the forecast dialog, not on the home screen
+        weatherExtra = ui.text("", 14, Ui.SOFT, Ui.REGULAR);
+        forecastView = ui.text("", 14, Ui.SOFT, Ui.REGULAR);
+        weather.setOnClickListener(v -> showWeatherDetails());
         header.addView(weather);
         weatherCard = weather;
 
@@ -351,23 +357,18 @@ public class HomeActivity extends Activity {
         avBg.setShape(GradientDrawable.OVAL);
         avatar.setBackground(avBg);
         avatar.setClipToOutline(true);
-        StateListDrawable ring = new StateListDrawable();
-        GradientDrawable on = new GradientDrawable(); on.setShape(GradientDrawable.OVAL); on.setStroke(ui.px(3), Ui.WHITE);
-        GradientDrawable off = new GradientDrawable(); off.setShape(GradientDrawable.OVAL); off.setStroke(ui.px(2), 0x66FFFFFF);
-        ring.addState(new int[]{android.R.attr.state_focused}, on);
-        ring.addState(new int[]{}, off);
-        avatar.setForeground(ring);
+        avatar.setForeground(ui.ovalRing());
         avatarImg = new ImageView(this);
         avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
         avatar.addView(avatarImg, new FrameLayout.LayoutParams(-1, -1));
-        avatarText = ui.text("", 26, Ui.WHITE, Ui.MEDIUM);
+        avatarText = ui.text("", 18, Ui.WHITE, Ui.MEDIUM);
         avatarText.setGravity(Gravity.CENTER);
         avatar.addView(avatarText, new FrameLayout.LayoutParams(-1, -1));
         avatar.setOnClickListener(v -> showAccountMenu());
         avatar.setOnFocusChangeListener((v, has) -> v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
                 .setInterpolator(new OvershootInterpolator(2f)).setDuration(220).start());
         // ---- quick settings gear (left of the avatar)
-        TextView gear = ui.text("⚙", 28, Ui.WHITE, Ui.REGULAR);
+        TextView gear = ui.text("⚙", 20, Ui.WHITE, Ui.REGULAR);
         gear.setGravity(Gravity.CENTER);
         gear.setFocusable(true);
         gear.setClickable(true);
@@ -381,30 +382,52 @@ public class HomeActivity extends Activity {
         gear.setOnClickListener(v -> showQuickSettings());
         gear.setOnFocusChangeListener((v, has) -> v.animate().rotation(has ? 60f : 0f).scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
                 .setInterpolator(new OvershootInterpolator(2f)).setDuration(300).start());
-        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(ui.px(56), ui.px(56));
-        glp.leftMargin = ui.px(22);
-        glp.gravity = Gravity.TOP;
-        glp.topMargin = ui.px(8);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(ui.px(40), ui.px(40));
+        glp.leftMargin = ui.px(14);
         header.addView(gear, glp);
         gearButton = gear;
 
-        LinearLayout.LayoutParams avlp = new LinearLayout.LayoutParams(ui.px(64), ui.px(64));
-        avlp.leftMargin = ui.px(22);
-        avlp.gravity = Gravity.TOP;
-        avlp.topMargin = ui.px(4);
+        LinearLayout.LayoutParams avlp = new LinearLayout.LayoutParams(ui.px(44), ui.px(44));
+        avlp.leftMargin = ui.px(14);
         header.addView(avatar, avlp);
 
         page.addView(header);
         headerView = timeCol;
 
-        // ---- body
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.HORIZONTAL);
-        body.setClipChildren(true);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, 0, 1);
-        blp.topMargin = ui.px(14);
-        page.addView(body, blp);
+        // ---- subscriptions strip: one thin line of chips
+        LinearLayout subsStrip = new LinearLayout(this);
+        subsStrip.setOrientation(LinearLayout.HORIZONTAL);
+        subsStrip.setGravity(Gravity.CENTER_VERTICAL);
+        subsStrip.setClipChildren(false);
+        TextView subsTitle = ui.text("Subscriptions", 13, Ui.WHITE, Ui.MEDIUM);
+        subsTitle.setPadding(ui.px(4), 0, ui.px(12), 0);
+        subsStrip.addView(subsTitle);
+        TextView add = ui.button("+ Add", true);
+        add.setPadding(ui.px(12), ui.px(4), ui.px(12), ui.px(4));
+        add.setTextSize(12);
+        add.setOnClickListener(v -> editSubscription(-1));
+        addButtonId = View.generateViewId();
+        add.setId(addButtonId);
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, -2);
+        alp.rightMargin = ui.px(12);
+        subsStrip.addView(add, alp);
+        subsSummary = ui.text("", 12, Ui.SOFT, Ui.REGULAR); // kept for status text, not shown
+        HorizontalScrollView subsScroll = new HorizontalScrollView(this);
+        subsScroll.setHorizontalScrollBarEnabled(false);
+        subsScroll.setClipToPadding(false);
+        subsScroll.setPadding(ui.px(2), ui.px(6), ui.px(2), ui.px(6));
+        subsBox = new LinearLayout(this);
+        subsBox.setOrientation(LinearLayout.HORIZONTAL);
+        subsBox.setGravity(Gravity.CENTER_VERTICAL);
+        subsScroll.addView(subsBox);
+        subsStrip.addView(subsScroll, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams sslp = new LinearLayout.LayoutParams(-1, -2);
+        sslp.topMargin = ui.px(10);
+        page.addView(subsStrip, sslp);
+        this.subsCard = subsStrip;
+        add.setNextFocusUpId(gear.getId());
 
+        // ---- apps: full width
         ScrollView scroll = new ScrollView(this);
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setClipChildren(true);
@@ -414,47 +437,9 @@ public class HomeActivity extends Activity {
         rowsBox.setOrientation(LinearLayout.VERTICAL);
         rowsBox.setClipChildren(true);
         scroll.addView(rowsBox);
-        body.addView(scroll, new LinearLayout.LayoutParams(0, -1, 1));
-
-        LinearLayout subsCard = new LinearLayout(this);
-        subsCard.setOrientation(LinearLayout.VERTICAL);
-        subsCard.setBackground(ui.glass(22));
-        subsCard.setPadding(ui.px(18), ui.px(16), ui.px(18), ui.px(16));
-        LinearLayout subsHead = new LinearLayout(this);
-        subsHead.setOrientation(LinearLayout.HORIZONTAL);
-        subsHead.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout titleCol = new LinearLayout(this);
-        titleCol.setOrientation(LinearLayout.VERTICAL);
-        titleCol.addView(ui.text("Subscriptions", 18, Ui.WHITE, Ui.MEDIUM));
-        subsSummary = ui.text("", 12, Ui.SOFT, Ui.REGULAR);
-        addWithTop(titleCol, subsSummary, 3);
-        subsHead.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView add = ui.button("+  Add", true);
-        add.setPadding(ui.px(14), ui.px(7), ui.px(14), ui.px(7));
-        add.setTextSize(13);
-        add.setOnClickListener(v -> editSubscription(-1));
-        addButtonId = View.generateViewId();
-        add.setId(addButtonId);
-        subsHead.addView(add);
-        subsCard.addView(subsHead);
-        ScrollView subsScroll = new ScrollView(this);
-        subsScroll.setVerticalScrollBarEnabled(false);
-        subsScroll.setClipToPadding(false);
-        subsBox = new LinearLayout(this);
-        subsBox.setOrientation(LinearLayout.VERTICAL);
-        subsBox.setPadding(ui.px(2), ui.px(4), ui.px(2), ui.px(4));
-        subsScroll.addView(subsBox);
-        LinearLayout.LayoutParams sslp = new LinearLayout.LayoutParams(-1, -2);
-        sslp.topMargin = ui.px(8);
-        subsCard.addView(subsScroll, sslp);
-        LinearLayout.LayoutParams sclp = new LinearLayout.LayoutParams(ui.px(260), -2);
-        sclp.leftMargin = ui.px(26);
-        sclp.topMargin = ui.px(34);
-        body.addView(subsCard, sclp);
-        this.subsCard = subsCard;
-        // Up from + Add -> avatar; Down from avatar -> + Add
-        add.setNextFocusUpId(avatar.getId());
-        avatar.setNextFocusDownId(addButtonId);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, 0, 1);
+        blp.topMargin = ui.px(2);
+        page.addView(scroll, blp);
 
         // ---- hint bar (move mode)
         hintBar = ui.text("", 15, Ui.WHITE, Ui.MEDIUM);
@@ -532,7 +517,7 @@ public class HomeActivity extends Activity {
         slideIn(weatherCard, ui.px(40), 0, 80, dec);
         slideIn(gearButton, ui.px(40), 0, 110, dec);
         slideIn(avatar, ui.px(40), 0, 140, dec);
-        slideIn(subsCard, ui.px(40), 0, 200, dec);
+        slideIn(subsCard, 0, -ui.px(16), 200, dec);
         int delay = 120;
         for (int i = 0; i < rowsBox.getChildCount(); i++) {
             View row = rowsBox.getChildAt(i);
@@ -621,6 +606,32 @@ public class HomeActivity extends Activity {
         first.requestFocus();
     }
 
+    // =================================================================== weather details
+
+    /** Full weather (feels-like, humidity, wind, 3-day forecast) from the compact header chip. */
+    private void showWeatherDetails() {
+        LinearLayout panel = panel();
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(ui.text(weatherIcon.getText().toString(), 44, Ui.WHITE, Ui.REGULAR));
+        TextView t = ui.text(weatherTemp.getText().toString(), 44, Ui.WHITE, Ui.LIGHT);
+        t.setPadding(ui.px(16), 0, 0, 0);
+        top.addView(t);
+        panel.addView(top);
+        addWithTop(panel, ui.text(weatherDesc.getText().toString(), 18, Ui.WHITE, Ui.MEDIUM), 8);
+        addWithTop(panel, ui.text(weatherExtra.getText().toString(), 15, Ui.SOFT, Ui.REGULAR), 10);
+        addWithTop(panel, ui.text(forecastView.getText().toString(), 15, Ui.SOFT, Ui.REGULAR), 10);
+        final Dialog d = dialog(panel);
+        TextView close = ui.button("Close", false);
+        close.setOnClickListener(v -> d.dismiss());
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-2, -2);
+        clp.topMargin = ui.px(20);
+        panel.addView(close, clp);
+        d.show();
+        close.requestFocus();
+    }
+
     // =================================================================== remote buttons
 
     /** True only when the helper is actually running (enabled AND accessibility master switch on). */
@@ -704,6 +715,7 @@ public class HomeActivity extends Activity {
             case 4065: return "YouTube button";
             case KeyEvent.KEYCODE_NOTIFICATION: return "Settings button";
             case KeyEvent.KEYCODE_ALL_APPS: return "Apps button";
+            case 4057: return "Web button";
             default:
                 String s = KeyEvent.keyCodeToString(code);
                 return s.startsWith("KEYCODE_") ? s.substring(8).replace('_', ' ') + " button" : "Button " + code;
@@ -995,7 +1007,7 @@ public class HomeActivity extends Activity {
         sys.addView(actionTile("📶", "Wi-Fi", new Intent(Settings.ACTION_WIFI_SETTINGS)));
         sys.addView(actionTile("▦", "All apps", new Intent(Settings.ACTION_APPLICATION_SETTINGS)));
         View themeBox = actionTile("🎨", "Theme", null);
-        themeTile = (TextView) ((ViewGroup) cardOf(themeBox).getChildAt(0)).getChildAt(1);
+        themeTile = (TextView) ((ViewGroup) themeBox).getChildAt(1);
         ((ViewGroup) themeBox).getChildAt(0).setOnClickListener(v -> {
             prefs().edit().putInt(KEY_THEME, prefs().getInt(KEY_THEME, 0) + 1).apply();
             applyTheme();
@@ -1029,13 +1041,13 @@ public class HomeActivity extends Activity {
 
     private LinearLayout addRow(String title) {
         TextView t = ui.text(title, 15, Ui.WHITE, Ui.MEDIUM);
-        t.setPadding(ui.px(4), ui.px(12), 0, ui.px(2));
+        t.setPadding(ui.px(4), ui.px(8), 0, 0);
         rowsBox.addView(t);
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
         hs.setClipChildren(false); // zoomed tile may use the padding; rowsBox clips at hs bounds
         hs.setClipToPadding(false);
-        hs.setPadding(ui.px(12), ui.px(10), ui.px(20), ui.px(10));
+        hs.setPadding(ui.px(10), ui.px(8), ui.px(20), ui.px(6));
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setClipChildren(false);
@@ -1045,40 +1057,40 @@ public class HomeActivity extends Activity {
         return row;
     }
 
-    /** Tile = container(card + label). Card is the focusable part. */
+    /** Tile = container(round icon disc + label). The disc is the focusable part. */
     private LinearLayout tileShell(String labelText) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER_HORIZONTAL);
         box.setClipChildren(false);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.rightMargin = ui.px(12);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ui.px(TILE_W), -2);
+        lp.rightMargin = ui.px(6);
         box.setLayoutParams(lp);
 
         FrameLayout card = new FrameLayout(this);
         card.setFocusable(true);
         card.setClickable(true);
-        card.setBackground(ui.glass(16));
-        card.setForeground(ui.focusRing(16));
+        card.setBackground(ui.ovalGlass());
+        card.setForeground(ui.ovalRing());
         card.setClipToOutline(true);
-        box.addView(card, new LinearLayout.LayoutParams(ui.px(TILE_W), ui.px(TILE_H)));
+        box.addView(card, new LinearLayout.LayoutParams(ui.px(TILE_D), ui.px(TILE_D)));
 
         final TextView label = ui.text(labelText, 10, Ui.MUTED, Ui.REGULAR);
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
         label.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(TILE_W), -2);
-        llp.topMargin = ui.px(7);
+        llp.topMargin = ui.px(6);
         box.addView(label, llp);
 
         card.setOnFocusChangeListener((v, has) -> {
-            float s = has ? 1.1f : 1f;
-            v.animate().scaleX(s).scaleY(s).translationY(has ? -ui.px(3) : 0)
+            float s = has ? 1.16f : 1f;
+            v.animate().scaleX(s).scaleY(s).translationY(has ? -ui.px(2) : 0)
                     .setInterpolator(has ? new OvershootInterpolator(2.2f) : new DecelerateInterpolator())
                     .setDuration(has ? 260 : 160).start();
             v.setElevation(has ? ui.px(10) : 0);
             label.setTextColor(has ? Ui.WHITE : Ui.MUTED);
-            label.animate().translationY(has ? ui.px(5) : 0).setDuration(140).start();
+            label.animate().translationY(has ? ui.px(4) : 0).setDuration(140).start();
         });
         return box;
     }
@@ -1087,25 +1099,15 @@ public class HomeActivity extends Activity {
         final PackageManager pm = getPackageManager();
         final String pkg = ri.activityInfo.packageName;
         final String name = label(ri);
-        Drawable banner = null;
-        try {
-            banner = pm.getActivityBanner(new ComponentName(pkg, ri.activityInfo.name));
-            if (banner == null) banner = pm.getApplicationBanner(pkg);
-        } catch (Exception ignored) { }
 
         final LinearLayout box = tileShell(name);
         box.setTag(pkg);
         FrameLayout card = (FrameLayout) box.getChildAt(0);
         card.setTag(pkg);
         ImageView iv = new ImageView(this);
-        if (banner != null) {
-            iv.setImageDrawable(banner);
-            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
-        } else {
-            iv.setImageDrawable(ri.loadIcon(pm));
-            card.addView(iv, new FrameLayout.LayoutParams(ui.px(30), ui.px(30), Gravity.CENTER));
-        }
+        iv.setImageDrawable(ri.loadIcon(pm));
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        card.addView(iv, new FrameLayout.LayoutParams(ui.px(TILE_ICON), ui.px(TILE_ICON), Gravity.CENTER));
         card.setContentDescription(name);
         card.setOnFocusChangeListener(chain(card.getOnFocusChangeListener(), (v, has) -> { if (has) focusPkg = pkg; }));
         card.setOnClickListener(v -> {
@@ -1126,24 +1128,14 @@ public class HomeActivity extends Activity {
         return (v, has) -> { if (a != null) a.onFocusChange(v, has); b.onFocusChange(v, has); };
     }
 
+    /** Round system tile: emoji icon in the disc, title underneath (box child 1). */
     private View actionTile(String icon, String title, Intent intent) {
         LinearLayout box = tileShell(title);
         FrameLayout card = (FrameLayout) box.getChildAt(0);
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER);
-        TextView ic = ui.text(icon, 16, Ui.WHITE, Ui.REGULAR);
+        TextView ic = ui.text(icon, 20, Ui.WHITE, Ui.REGULAR);
         ic.setGravity(Gravity.CENTER);
-        col.addView(ic);
-        TextView t = ui.text(title, 10, Ui.SOFT, Ui.MEDIUM);
-        t.setGravity(Gravity.CENTER);
-        addWithTop(col, t, 6);
-        card.removeAllViews();
-        card.addView(col, new FrameLayout.LayoutParams(-1, -1));
-        // the card holds the icon+title, so hide the duplicate label under it
-        box.getChildAt(1).setVisibility(View.INVISIBLE);
+        card.addView(ic, new FrameLayout.LayoutParams(-1, -1));
         if (intent != null) card.setOnClickListener(v -> safeStart(intent));
-        // expose: box(0)=card, card(0)=col, col(1)=title
         return box;
     }
 
@@ -1206,14 +1198,14 @@ public class HomeActivity extends Activity {
 
     private FrameLayout cardOf(View box) { return (FrameLayout) ((ViewGroup) box).getChildAt(0); }
 
-    private static final int TILE_W = 100, TILE_H = 56; // smaller tiles: more apps per row
+    private static final int TILE_W = 84, TILE_D = 60, TILE_ICON = 40; // small round icons: ~14 per row
 
     private static final String ARRANGE_HINT = "Arrange apps:  select an app, press OK to pick it up        BACK  finish";
 
     private void startMove(View box) {
         moving = box;
         FrameLayout card = cardOf(box);
-        card.setForeground(ui.moveRing(16));
+        card.setForeground(ui.ovalMoveRing());
         LayoutTransition lt = new LayoutTransition();
         lt.disableTransitionType(LayoutTransition.APPEARING);
         lt.disableTransitionType(LayoutTransition.DISAPPEARING);
@@ -1286,7 +1278,7 @@ public class HomeActivity extends Activity {
         final FrameLayout card = cardOf(moving);
         if (wiggle != null) wiggle.cancel();
         card.setRotation(0f);
-        card.setForeground(ui.focusRing(16));
+        card.setForeground(ui.ovalRing());
         ((ViewGroup) moving.getParent()).setLayoutTransition(null);
         // little "drop" bounce
         card.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).withEndAction(() ->
@@ -1332,9 +1324,8 @@ public class HomeActivity extends Activity {
         final LocalDate today = LocalDate.now();
         if (subs.length() == 0) {
             subsSummary.setText("Nothing tracked yet");
-            TextView hint = ui.text("Track when your plans renew or expire.\nSelect  + Add  to start.", 13, Ui.SOFT, Ui.REGULAR);
-            hint.setLineSpacing(ui.px(3), 1f);
-            hint.setPadding(ui.px(2), ui.px(10), 0, ui.px(4));
+            TextView hint = ui.text("Track when Netflix, Prime and other plans renew  ·  select  + Add", 12, Ui.MUTED, Ui.REGULAR);
+            hint.setPadding(ui.px(6), 0, 0, 0);
             subsBox.addView(hint);
             return;
         }
@@ -1367,28 +1358,29 @@ public class HomeActivity extends Activity {
             line.setGravity(Gravity.CENTER_VERTICAL);
             line.setFocusable(true);
             line.setClickable(true);
-            line.setBackground(ui.glassItem(14));
-            line.setPadding(ui.px(10), ui.px(9), ui.px(10), ui.px(9));
+            // compact chip:  [icon] Name  [12 d]
+            line.setBackground(ui.glassItem(18));
+            line.setPadding(ui.px(8), ui.px(5), ui.px(8), ui.px(5));
             line.setOnClickListener(v -> editSubscription(i));
+            line.setContentDescription(name + ", " + when);
 
             String pkg = o.optString("pkg", "");
             if (!pkg.isEmpty()) {
                 try {
                     ImageView iv = new ImageView(this);
                     iv.setImageDrawable(getPackageManager().getApplicationIcon(pkg));
-                    LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ui.px(30), ui.px(30));
-                    ilp.rightMargin = ui.px(10);
+                    LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ui.px(20), ui.px(20));
+                    ilp.rightMargin = ui.px(7);
                     line.addView(iv, ilp);
                 } catch (Exception ignored) { }
             }
-            LinearLayout col = new LinearLayout(this);
-            col.setOrientation(LinearLayout.VERTICAL);
-            TextView n = ui.text(name, 14, Ui.WHITE, Ui.MEDIUM);
+            TextView n = ui.text(name, 13, Ui.WHITE, Ui.MEDIUM);
             n.setSingleLine(true);
+            n.setMaxWidth(ui.px(150));
             n.setEllipsize(TextUtils.TruncateAt.END);
-            col.addView(n);
-            addWithTop(col, ui.text(when + ("once".equals(rep) ? "" : " · " + REPEAT_LABELS[repeatIndex(rep)]), 11, Ui.MUTED, Ui.REGULAR), 3);
-            line.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-2, -2);
+            nlp.rightMargin = ui.px(8);
+            line.addView(n, nlp);
 
             String pill;
             int color;
@@ -1398,15 +1390,15 @@ public class HomeActivity extends Activity {
             else if (days <= 3) { pill = days + " d"; color = Ui.RED; }
             else if (days <= 14) { pill = days + " d"; color = Ui.AMBER; }
             else { pill = days + " d"; color = Ui.GREEN; }
-            TextView p = ui.text(pill, 12, Ui.INK, Ui.MEDIUM);
+            TextView p = ui.text(pill, 11, Ui.INK, Ui.MEDIUM);
             p.setShadowLayer(0, 0, 0, 0);
-            p.setPadding(ui.px(9), ui.px(4), ui.px(9), ui.px(4));
-            p.setBackground(ui.round(color, 12, 0, 0));
+            p.setPadding(ui.px(7), ui.px(2), ui.px(7), ui.px(2));
+            p.setBackground(ui.round(color, 10, 0, 0));
             line.addView(p);
             if (days != Long.MIN_VALUE && days <= 3) pulse(p);
 
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            lp.topMargin = ui.px(8);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = ui.px(10);
             subsBox.addView(line, lp);
         }
         subsSummary.setText(subs.length() + " tracked" + (soon > 0 ? " · " + soon + " due within a week" : " · all good"));

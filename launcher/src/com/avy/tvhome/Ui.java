@@ -96,6 +96,27 @@ final class Ui {
 
     Drawable moveRing(float radiusDp) { return round(0x22FFD166, radiusDp, 3.5f, GOLD); }
 
+    private GradientDrawable oval(int fill, float strokeDp, int stroke) {
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.OVAL);
+        d.setColor(fill);
+        if (strokeDp > 0) d.setStroke(Math.max(1, px(strokeDp)), stroke);
+        return d;
+    }
+
+    /** Round glass disc behind app icons. */
+    Drawable ovalGlass() { return oval(0x2EFFFFFF, 1, 0x40FFFFFF); }
+
+    /** Round focus ring drawn over icon discs. */
+    Drawable ovalRing() {
+        StateListDrawable s = new StateListDrawable();
+        s.addState(new int[]{android.R.attr.state_focused}, oval(0x00000000, 3, WHITE));
+        s.addState(new int[]{}, oval(0x00000000, 1, 0x33FFFFFF));
+        return s;
+    }
+
+    Drawable ovalMoveRing() { return oval(0x22FFD166, 3.5f, GOLD); }
+
     /** Glass row/list item that lights up when focused. */
     Drawable glassItem(float radiusDp) {
         StateListDrawable s = new StateListDrawable();

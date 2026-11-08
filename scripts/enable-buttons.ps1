@@ -8,6 +8,9 @@ param([switch]$NoConnect)
 if (-not $NoConnect) { Connect-Tv }
 
 $svc = 'com.avy.tvhome/com.avy.tvhome.KeyService'
+# After an install the app isn't running yet; binding only sticks once it has started.
+Invoke-Adb shell am start -n com.avy.tvhome/.HomeActivity | Out-Null
+Start-Sleep 4
 for ($try = 1; $try -le 4; $try++) {
     Invoke-Adb shell settings put secure accessibility_enabled 1
     Start-Sleep 1
