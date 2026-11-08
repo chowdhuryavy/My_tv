@@ -117,6 +117,8 @@ public class HomeActivity extends Activity {
     private AnimatorSet drift;
     private ObjectAnimator iconFloat, wiggle;
     private final List<Animator> pulses = new ArrayList<>();
+    private final List<Animator> particleAnims = new ArrayList<>();
+    private FrameLayout rootLayout, particles;
 
     private long lastWeatherAt = 0;
     private double lat = Double.NaN, lon = Double.NaN;
@@ -125,7 +127,19 @@ public class HomeActivity extends Activity {
     private final Runnable clockTick = new Runnable() {
         @Override public void run() {
             Date now = new Date();
-            clockView.setText(new SimpleDateFormat("h:mm", Locale.getDefault()).format(now));
+            final String hm = new SimpleDateFormat("h:mm", Locale.getDefault()).format(now);
+            CharSequence shown = clockView.getText();
+            if (shown.length() == 0) {
+                clockView.setText(hm);
+            } else if (!hm.contentEquals(shown)) {
+                // new minute slides up into place
+                clockView.animate().translationY(-ui.px(10)).alpha(0f).setDuration(160).withEndAction(() -> {
+                    clockView.setText(hm);
+                    clockView.setTranslationY(ui.px(12));
+                    clockView.animate().translationY(0).alpha(1f).setDuration(260)
+                            .setInterpolator(new OvershootInterpolator(1.6f)).start();
+                }).start();
+            }
             ampmView.setText(new SimpleDateFormat("a", Locale.getDefault()).format(now));
             dateView.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
             int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
@@ -285,9 +299,28 @@ public class HomeActivity extends Activity {
 
     private View buildUi() {
         FrameLayout root = new FrameLayout(this);
+        rootLayout = root;
         backdrop = new ImageView(this);
         backdrop.setScaleType(ImageView.ScaleType.FIT_XY);
         root.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
+
+        // floating light particles over the backdrop (animated in startAmbient)
+        particles = new FrameLayout(this);
+        java.util.Random rnd = new java.util.Random(7);
+        int w = getResources().getDisplayMetrics().widthPixels;
+        for (int i = 0; i < 14; i++) {
+            View dot = new View(this);
+            GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xCCFFFFFF, 0x33FFFFFF});
+            g.setShape(GradientDrawable.OVAL);
+            g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+            int sz = ui.px(4 + rnd.nextInt(8));
+            g.setGradientRadius(sz / 2f);
+            dot.setBackground(g);
+            FrameLayout.LayoutParams dlp2 = new FrameLayout.LayoutParams(sz, sz);
+            dlp2.leftMargin = rnd.nextInt(Math.max(1, w));
+            particles.addView(dot, dlp2);
+        }
+        root.addView(particles, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
@@ -433,7 +466,7 @@ public class HomeActivity extends Activity {
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setClipChildren(true);
         scroll.setClipToPadding(false);
-        scroll.setPadding(0, 0, 0, ui.px(40));
+        scroll.setPadding(0, ui.px(16), 0, ui.px(40)); // headroom so a lifted (moving) icon isn't cut off
         rowsBox = new LinearLayout(this);
         rowsBox.setOrientation(LinearLayout.VERTICAL);
         rowsBox.setClipChildren(true);
@@ -503,12 +536,42 @@ public class HomeActivity extends Activity {
         iconFloat.setRepeatMode(ValueAnimator.REVERSE);
         iconFloat.setInterpolator(new AccelerateDecelerateInterpolator());
         iconFloat.start();
+
+        // light particles rise slowly from the bottom, twinkling, each on its own rhythm
+        int h = getResources().getDisplayMetrics().heightPixels;
+        java.util.Random rnd = new java.util.Random();
+        for (int i = 0; particles != null && i < particles.getChildCount(); i++) {
+            View dot = particles.getChildAt(i);
+            long dur = 16_000 + rnd.nextInt(14_000);
+            ObjectAnimator rise = ObjectAnimator.ofFloat(dot, View.TRANSLATION_Y, h + ui.px(20), -ui.px(30));
+            rise.setDuration(dur);
+            rise.setRepeatCount(ValueAnimator.INFINITE);
+            rise.setInterpolator(new android.view.animation.LinearInterpolator());
+            rise.setCurrentPlayTime(rnd.nextInt((int) dur)); // start somewhere mid-flight
+            rise.start();
+            ObjectAnimator sway = ObjectAnimator.ofFloat(dot, View.TRANSLATION_X, -ui.px(18), ui.px(18));
+            sway.setDuration(3_000 + rnd.nextInt(3_000));
+            sway.setRepeatCount(ValueAnimator.INFINITE);
+            sway.setRepeatMode(ValueAnimator.REVERSE);
+            sway.setInterpolator(new AccelerateDecelerateInterpolator());
+            sway.start();
+            ObjectAnimator twinkle = ObjectAnimator.ofFloat(dot, View.ALPHA, 0.15f, 0.8f);
+            twinkle.setDuration(1_500 + rnd.nextInt(2_000));
+            twinkle.setRepeatCount(ValueAnimator.INFINITE);
+            twinkle.setRepeatMode(ValueAnimator.REVERSE);
+            twinkle.start();
+            particleAnims.add(rise);
+            particleAnims.add(sway);
+            particleAnims.add(twinkle);
+        }
     }
 
     private void stopAmbient() {
         if (drift != null) drift.cancel();
         if (iconFloat != null) iconFloat.cancel();
         for (Animator a : pulses) a.cancel();
+        for (Animator a : particleAnims) a.cancel();
+        particleAnims.clear();
     }
 
     /** Header, cards and app rows glide in, rows one after another. */
@@ -1166,7 +1229,7 @@ public class HomeActivity extends Activity {
     private String label(ResolveInfo ri) { return String.valueOf(ri.loadLabel(getPackageManager())); }
 
     private LinearLayout addRow(String title) {
-        TextView t = ui.text(title, 15, Ui.WHITE, Ui.MEDIUM);
+        TextView t = ui.text(title, 15, Ui.SOFT, Ui.MEDIUM); // lights up when its row has focus
         t.setPadding(ui.px(4), ui.px(8), 0, 0);
         rowsBox.addView(t);
         HorizontalScrollView hs = new HorizontalScrollView(this);
@@ -1210,6 +1273,8 @@ public class HomeActivity extends Activity {
         box.addView(label, llp);
 
         card.setOnFocusChangeListener((v, has) -> {
+            boolean lifted = moving != null && moving == box; // app being moved stays lifted
+            if (lifted) return;
             float s = has ? 1.16f : 1f;
             v.animate().scaleX(s).scaleY(s).translationY(has ? -ui.px(2) : 0)
                     .setInterpolator(has ? new OvershootInterpolator(2.2f) : new DecelerateInterpolator())
@@ -1217,6 +1282,7 @@ public class HomeActivity extends Activity {
             v.setElevation(has ? ui.px(10) : 0);
             label.setTextColor(has ? Ui.WHITE : Ui.MUTED);
             label.animate().translationY(has ? ui.px(4) : 0).setDuration(140).start();
+            highlightRowTitle(box, has);
         });
         return box;
     }
@@ -1242,9 +1308,15 @@ public class HomeActivity extends Activity {
         card.setOnFocusChangeListener(chain(card.getOnFocusChangeListener(), (v, has) -> { if (has) focusPkg = pkg; }));
         card.setOnClickListener(v -> {
             if (arranging) { startMove(box); return; }
-            Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
-            if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
-            if (launch != null) safeStart(launch);
+            // press: quick squeeze and bounce, then open the app
+            v.animate().scaleX(0.86f).scaleY(0.86f).setDuration(90).setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(() -> {
+                        v.animate().scaleX(1.16f).scaleY(1.16f).setDuration(220)
+                                .setInterpolator(new OvershootInterpolator(3f)).start();
+                        Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
+                        if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
+                        if (launch != null) safeStart(launch);
+                    }).start();
         });
         card.setOnLongClickListener(v -> { showAppMenu(pkg, name, box); return true; });
         card.setOnKeyListener((v, code, ev) -> {
@@ -1332,22 +1404,87 @@ public class HomeActivity extends Activity {
 
     private static final String ARRANGE_HINT = "Arrange apps:  select an app, press OK to pick it up        BACK  finish";
 
+    /** Row title (the TextView just above the row's scroller) brightens and nudges right while its row has focus. */
+    private void highlightRowTitle(View box, boolean on) {
+        try {
+            View hs = (View) box.getParent().getParent();
+            ViewGroup rows = (ViewGroup) hs.getParent();
+            View title = rows.getChildAt(rows.indexOfChild(hs) - 1);
+            if (!(title instanceof TextView)) return;
+            ((TextView) title).setTextColor(on ? Ui.WHITE : Ui.SOFT);
+            title.animate().translationX(on ? ui.px(8) : 0).setDuration(220)
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        } catch (Exception ignored) { } // tile temporarily detached while moving
+    }
+
+    private ValueAnimator ringPulse;
+
     private void startMove(View box) {
         moving = box;
-        FrameLayout card = cardOf(box);
+        final FrameLayout card = cardOf(box);
+        final ViewGroup row = (ViewGroup) box.getParent();
         card.setForeground(ui.ovalMoveRing());
+        // neighbours glide aside with a soft overshoot
         LayoutTransition lt = new LayoutTransition();
         lt.disableTransitionType(LayoutTransition.APPEARING);
         lt.disableTransitionType(LayoutTransition.DISAPPEARING);
-        lt.setDuration(220);
-        ((ViewGroup) box.getParent()).setLayoutTransition(lt); // neighbours slide aside
-        wiggle = ObjectAnimator.ofFloat(card, View.ROTATION, -1.6f, 1.6f);
-        wiggle.setDuration(150);
+        lt.setDuration(260);
+        lt.setInterpolator(LayoutTransition.CHANGE_APPEARING, new OvershootInterpolator(1.2f));
+        lt.setInterpolator(LayoutTransition.CHANGE_DISAPPEARING, new OvershootInterpolator(1.2f));
+        row.setLayoutTransition(lt);
+        // lift: bigger, higher, above everything
+        card.setElevation(ui.px(18));
+        card.animate().scaleX(1.3f).scaleY(1.3f).translationY(-ui.px(10)).rotation(0)
+                .setInterpolator(new OvershootInterpolator(2.5f)).setDuration(320).start();
+        ((TextView) ((ViewGroup) box).getChildAt(1)).setTextColor(Ui.GOLD);
+        // everything else in the row steps back
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View other = row.getChildAt(i);
+            if (other != box) other.animate().alpha(0.4f).scaleX(0.94f).scaleY(0.94f).setDuration(240).start();
+        }
+        // gentle wiggle + pulsing gold ring while held
+        wiggle = ObjectAnimator.ofFloat(card, View.ROTATION, -1.4f, 1.4f);
+        wiggle.setDuration(160);
         wiggle.setRepeatCount(ValueAnimator.INFINITE);
         wiggle.setRepeatMode(ValueAnimator.REVERSE);
+        wiggle.setStartDelay(320);
         wiggle.start();
+        ringPulse = ValueAnimator.ofInt(255, 110);
+        ringPulse.setDuration(600);
+        ringPulse.setRepeatCount(ValueAnimator.INFINITE);
+        ringPulse.setRepeatMode(ValueAnimator.REVERSE);
+        ringPulse.addUpdateListener(a -> {
+            Drawable fg = card.getForeground();
+            if (fg != null) fg.setAlpha((Integer) a.getAnimatedValue());
+        });
+        ringPulse.start();
         showHint("◀  ▶   move app        OK   drop here");
         card.requestFocus();
+    }
+
+    /** Expanding gold rings from a view's centre (drop "splash"). */
+    private void burstAt(View v) {
+        if (rootLayout == null || v.getWidth() == 0) return;
+        int[] at = new int[2], base = new int[2];
+        v.getLocationInWindow(at);
+        rootLayout.getLocationInWindow(base);
+        int size = v.getWidth();
+        for (int k = 0; k < 2; k++) {
+            final View ring = new View(this);
+            GradientDrawable g = new GradientDrawable();
+            g.setShape(GradientDrawable.OVAL);
+            g.setStroke(ui.px(k == 0 ? 3 : 2), Ui.GOLD);
+            ring.setBackground(g);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
+            lp.leftMargin = at[0] - base[0];
+            lp.topMargin = at[1] - base[1];
+            rootLayout.addView(ring, lp);
+            ring.setScaleX(1f);
+            ring.setScaleY(1f);
+            ring.animate().scaleX(k == 0 ? 2.1f : 2.7f).scaleY(k == 0 ? 2.1f : 2.7f).alpha(0f)
+                    .setStartDelay(k * 130L).setDuration(560).setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(() -> rootLayout.removeView(ring)).start();
+        }
     }
 
     private void showHint(String text) {
@@ -1392,7 +1529,14 @@ public class HomeActivity extends Activity {
         if (to < 0 || to >= row.getChildCount()) return;
         row.removeView(moving);
         row.addView(moving, to);
-        cardOf(moving).requestFocus();
+        final FrameLayout card = cardOf(moving);
+        card.requestFocus();
+        // hop into the new spot
+        card.animate().cancel();
+        card.animate().scaleX(1.3f).scaleY(1.3f).translationY(-ui.px(24)).setDuration(110)
+                .setInterpolator(new DecelerateInterpolator())
+                .withEndAction(() -> card.animate().translationY(-ui.px(10)).setDuration(200)
+                        .setInterpolator(new OvershootInterpolator(3f)).start()).start();
         saveRowOrder(row);
     }
 
@@ -1405,15 +1549,34 @@ public class HomeActivity extends Activity {
     }
 
     private void endMove() {
-        final FrameLayout card = cardOf(moving);
+        final View box = moving;
+        final FrameLayout card = cardOf(box);
+        final ViewGroup row = (ViewGroup) box.getParent();
         if (wiggle != null) wiggle.cancel();
+        if (ringPulse != null) ringPulse.cancel();
         card.setRotation(0f);
         card.setForeground(ui.ovalRing());
-        ((ViewGroup) moving.getParent()).setLayoutTransition(null);
-        // little "drop" bounce
-        card.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).withEndAction(() ->
-                card.animate().scaleX(1.1f).scaleY(1.1f).setInterpolator(new OvershootInterpolator(3f)).setDuration(240).start()).start();
+        row.setLayoutTransition(null);
+        ((TextView) ((ViewGroup) box).getChildAt(1)).setTextColor(Ui.WHITE);
         moving = null;
+        // drop: press down, settle with a bounce, splash of gold rings
+        card.animate().cancel();
+        card.animate().scaleX(0.9f).scaleY(0.9f).translationY(0).setDuration(110)
+                .setInterpolator(new DecelerateInterpolator())
+                .withEndAction(() -> {
+                    burstAt(card);
+                    card.setElevation(ui.px(10));
+                    card.animate().scaleX(1.16f).scaleY(1.16f).translationY(-ui.px(2))
+                            .setInterpolator(new OvershootInterpolator(3f)).setDuration(300).start();
+                }).start();
+        // neighbours come back, rippling outwards from the drop point
+        int at = row.indexOfChild(box);
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View other = row.getChildAt(i);
+            if (other == box) continue;
+            other.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(60L * Math.abs(i - at))
+                    .setDuration(260).setInterpolator(new OvershootInterpolator(1.5f)).start();
+        }
         if (arranging) showHint(ARRANGE_HINT);
         else { hideHint(); Toast.makeText(this, "Order saved", Toast.LENGTH_SHORT).show(); }
     }
@@ -1530,6 +1693,12 @@ public class HomeActivity extends Activity {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
             lp.rightMargin = ui.px(10);
             subsBox.addView(line, lp);
+            // chips pop in one after another
+            line.setAlpha(0f);
+            line.setScaleX(0.7f);
+            line.setScaleY(0.7f);
+            line.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(250 + 80L * subsBox.indexOfChild(line))
+                    .setDuration(300).setInterpolator(new OvershootInterpolator(2f)).start();
         }
         subsSummary.setText(subs.length() + " tracked" + (soon > 0 ? " · " + soon + " due within a week" : " · all good"));
     }
