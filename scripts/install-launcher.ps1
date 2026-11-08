@@ -18,8 +18,12 @@ Start-Sleep 2
 $focus = (Invoke-Adb shell dumpsys window) | Select-String 'mCurrentFocus' | Select-Object -First 1
 if ("$focus" -notmatch 'com.avy.tvhome') { throw "Avy TV Home did not come to the front ($focus). Stock launcher left untouched." }
 
-Invoke-Adb shell cmd package set-home-activity com.avy.tvhome/.HomeActivity
 Invoke-Adb shell pm disable-user --user 0 com.google.android.apps.tv.launcherx
+# Google TV's setup app registers a system "RecoveryActivity" as a HOME fallback that
+# outranks any third-party launcher once the stock one is off; disable it too.
+Invoke-Adb shell pm disable-user --user 0 com.google.android.tungsten.setupwraith
+# Set the default only after the HOME candidates changed, otherwise it is ignored.
+Invoke-Adb shell cmd package set-home-activity com.avy.tvhome/.HomeActivity
 
 # Press Home and confirm.
 Invoke-Adb shell input keyevent KEYCODE_HOME

@@ -51,4 +51,11 @@ Leave `city` empty to detect it automatically, or set it to a city name such as 
 - JDK 17: `winget install Microsoft.OpenJDK.17`
 - From the Android SDK: `platforms;android-31` and `build-tools;35.0.1`. `build.ps1` looks for them in `%LOCALAPPDATA%\Android\sdk-lite`, `%LOCALAPPDATA%\Android\Sdk` or `ANDROID_HOME`.
 
-The stock launcher is only **disabled** (`pm disable-user`), not removed, so `restore-stock-launcher.ps1` fully undoes the change.
+## What gets changed on the TV
+
+`install-launcher.ps1` **disables** two Google packages with `pm disable-user`. Nothing is uninstalled.
+
+- `com.google.android.apps.tv.launcherx`: the stock Google TV home screen, which is where the ads come from.
+- `com.google.android.tungsten.setupwraith`: Google TV's setup app. It registers a system "recovery" home screen that would otherwise take over the Home button from any third-party launcher.
+
+`restore-stock-launcher.ps1` re-enables both and fully undoes the change. Run it before a factory reset or a big system update.

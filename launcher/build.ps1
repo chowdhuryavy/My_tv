@@ -1,4 +1,4 @@
-# Builds launcher\out\avy-tv-home.apk without Gradle or Android Studio.
+﻿# Builds launcher\out\avy-tv-home.apk without Gradle or Android Studio.
 # Needs: JDK 17, and from the Android SDK: platforms\android-31 + build-tools 35.0.1.
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -23,12 +23,12 @@ Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$out\classes", "$out\dex" | Out-Null
 
 # --- compile Java
-$sources = Get-ChildItem "$here\src" -Recurse -Filter *.java | ForEach-Object { $_.FullName }
-& javac -encoding UTF-8 -source 8 -target 8 -Xlint:-options -bootclasspath $androidJar -d "$out\classes" @sources
+$sources = @(Get-ChildItem "$here\src" -Recurse -Filter *.java | ForEach-Object { $_.FullName })
+& javac -encoding UTF-8 --release 8 -nowarn -classpath $androidJar -d "$out\classes" @sources
 if ($LASTEXITCODE) { throw 'javac failed' }
 
 # --- dex
-$classes = Get-ChildItem "$out\classes" -Recurse -Filter *.class | ForEach-Object { $_.FullName }
+$classes = @(Get-ChildItem "$out\classes" -Recurse -Filter *.class | ForEach-Object { $_.FullName })
 & "$bt\d8.bat" --release --min-api 26 --lib $androidJar --output "$out\dex" @classes
 if ($LASTEXITCODE) { throw 'd8 failed' }
 
