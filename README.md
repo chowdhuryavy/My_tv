@@ -55,6 +55,8 @@ launcher\build.ps1                   # build launcher\out\avy-tv-home.apk
 scripts\install-launcher.ps1         # install/update it and make it the home screen
 scripts\set-config.ps1               # optional: force a weather city from config\config.json
 scripts\set-avatar.ps1 photo.jpg     # optional: your picture in the top-right avatar
+scripts\google-accounts.ps1          # Google launcher on briefly for Settings > Accounts & Profiles; Enter = back to Avy
+scripts\enable-buttons.ps1           # optional: remote-button helper so buttons work inside other apps too
 scripts\restore-stock-launcher.ps1   # go back to the original Google TV home
 ```
 
