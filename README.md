@@ -73,3 +73,22 @@ scripts\restore-stock-launcher.ps1   # go back to the original Google TV home
 - `com.google.android.tungsten.setupwraith`: Google TV's setup app. It registers a system "recovery" home screen that would otherwise take over the Home button from any third-party launcher.
 
 `restore-stock-launcher.ps1` re-enables both and fully undoes the change. Run it before a factory reset or a big system update.
+
+## Google photo sync (automatic profile picture)
+
+Android doesn't give your Google profile photo to other apps; only Google's own launcher could show it. Avy TV Home instead signs in with Google's official **TV sign-in** (you approve on your phone). It asks only for your **name, email and photo**, and refreshes the photo automatically every few hours.
+
+One-time setup (about 10 minutes, free):
+
+1. Open <https://console.cloud.google.com> and **create a project**, for example "Avy TV Home".
+2. Go to **Google Auth Platform → Get started**. Enter an app name and your email, choose **Audience: External**, and finish.
+3. Under **Audience**, select **Publish app**. Without this, Google signs you out after 7 days. Name, email and photo don't need Google's review.
+4. Go to **Clients → Create client** and choose **TVs and Limited Input devices**. Copy the **Client ID** and **Client secret**.
+5. On the PC, put them in `config/config.json` (git-ignored, never pushed):
+   ```json
+   { "city": "", "name": "Avy", "google_client_id": "…apps.googleusercontent.com", "google_client_secret": "…" }
+   ```
+   Then run `scripts\set-config.ps1`.
+6. On the TV, select the **avatar → Sign in with Google (photo)**. On your phone, open **google.com/device**, enter the code shown on the TV, and allow access.
+
+To stop syncing, use **avatar → Stop Google photo sync**. To remove access completely, go to myaccount.google.com → Security → Third-party connections.

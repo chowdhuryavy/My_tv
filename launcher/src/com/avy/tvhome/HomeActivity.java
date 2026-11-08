@@ -166,6 +166,7 @@ public class HomeActivity extends Activity {
         renderApps();
         renderSubscriptions();
         refreshAvatar();
+        syncGooglePhoto(false); // keeps the Google photo current (every few hours)
         handler.removeCallbacks(clockTick);
         handler.post(clockTick);
         startAmbient();
@@ -838,12 +839,123 @@ public class HomeActivity extends Activity {
         }
     }
 
+    // =================================================================== Google photo sync
+
+    private static final String KEY_G_REFRESH = "g_refresh_token";
+    private static final String KEY_G_SYNCED_AT = "g_synced_at";
+    private static final long G_SYNC_EVERY_MS = 6 * 60 * 60 * 1000L;
+
+    private File googlePhotoFile() { return new File(getFilesDir(), "google_avatar.png"); }
+
+    private String gClientId() { return config().optString("google_client_id", "").trim(); }
+    private String gClientSecret() { return config().optString("google_client_secret", "").trim(); }
+
+    /** Shows a code; the user approves on their phone at google.com/device. */
+    private void startGoogleSignIn() {
+        final String id = gClientId(), secret = gClientSecret();
+        if (id.isEmpty() || secret.isEmpty()) {
+            LinearLayout panel = panel();
+            panel.addView(ui.text("One-time setup needed", 22, Ui.WHITE, Ui.MEDIUM));
+            TextView t = ui.text("Google needs a sign-in ID for this home screen.\nFollow \"Google photo sync\" in the My_tv README on the PC,\nthen run scripts\\set-config.ps1.", 14, Ui.SOFT, Ui.REGULAR);
+            t.setLineSpacing(ui.px(3), 1f);
+            addWithTop(panel, t, 8);
+            final Dialog d = dialog(panel);
+            TextView ok = ui.button("OK", true);
+            ok.setOnClickListener(v -> d.dismiss());
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.topMargin = ui.px(18);
+            panel.addView(ok, lp);
+            d.show();
+            ok.requestFocus();
+            return;
+        }
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Sign in with Google", 24, Ui.WHITE, Ui.MEDIUM));
+        final TextView step = ui.text("Getting a code…", 15, Ui.SOFT, Ui.REGULAR);
+        addWithTop(panel, step, 10);
+        final TextView code = ui.text("", 46, Ui.WHITE, Ui.MEDIUM);
+        code.setLetterSpacing(0.15f);
+        addWithTop(panel, code, 12);
+        final TextView status = ui.text("", 13, Ui.MUTED, Ui.REGULAR);
+        addWithTop(panel, status, 12);
+        final Dialog d = dialog(panel);
+        final boolean[] cancelled = {false};
+        TextView cancel = ui.button("Cancel", false);
+        cancel.setOnClickListener(v -> d.dismiss());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = ui.px(18);
+        panel.addView(cancel, lp);
+        d.setOnDismissListener(x -> cancelled[0] = true);
+        d.show();
+        cancel.requestFocus();
+
+        new Thread(() -> {
+            try {
+                GoogleProfile.DeviceCode dc = GoogleProfile.start(id);
+                runOnUiThread(() -> {
+                    step.setText("On your phone, open  " + dc.url.replace("https://", "") + "  and enter:");
+                    code.setText(dc.userCode);
+                    status.setText("Waiting for you to approve on the phone…");
+                });
+                long until = System.currentTimeMillis() + dc.expiresIn * 1000L;
+                int wait = Math.max(dc.interval, 5);
+                while (!cancelled[0] && System.currentTimeMillis() < until) {
+                    Thread.sleep(wait * 1000L);
+                    JSONObject tok = GoogleProfile.poll(id, secret, dc.deviceCode);
+                    if (tok == null) continue;
+                    String refresh = tok.optString("refresh_token", "");
+                    if (!refresh.isEmpty()) prefs().edit().putString(KEY_G_REFRESH, refresh).apply();
+                    runOnUiThread(() -> { status.setText("Signed in. Getting your photo…"); });
+                    syncGooglePhotoBlocking(tok.optString("access_token", null));
+                    runOnUiThread(() -> { if (d.isShowing()) d.dismiss(); refreshAvatar(); });
+                    return;
+                }
+                if (!cancelled[0]) runOnUiThread(() -> status.setText("The code expired. Close and try again."));
+            } catch (Exception e) {
+                final String msg = e.getMessage();
+                runOnUiThread(() -> status.setText("Couldn't sign in: " + msg));
+            }
+        }).start();
+    }
+
+    /** Background refresh of the Google photo (on resume, at most every few hours). */
+    private void syncGooglePhoto(boolean force) {
+        if (prefs().getString(KEY_G_REFRESH, "").isEmpty()) return;
+        if (!force && System.currentTimeMillis() - prefs().getLong(KEY_G_SYNCED_AT, 0) < G_SYNC_EVERY_MS) return;
+        prefs().edit().putLong(KEY_G_SYNCED_AT, System.currentTimeMillis()).apply();
+        new Thread(() -> {
+            try {
+                syncGooglePhotoBlocking(null);
+                runOnUiThread(() -> { refreshAvatar(); if (force) Toast.makeText(this, "Google photo updated", Toast.LENGTH_SHORT).show(); });
+            } catch (Exception e) {
+                if (force) runOnUiThread(() -> Toast.makeText(this, "Couldn't update photo: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    private void syncGooglePhotoBlocking(String access) throws Exception {
+        if (access == null) access = GoogleProfile.accessToken(gClientId(), gClientSecret(), prefs().getString(KEY_G_REFRESH, ""));
+        JSONObject me = GoogleProfile.userInfo(access);
+        SharedPreferences.Editor ed = prefs().edit().putLong(KEY_G_SYNCED_AT, System.currentTimeMillis());
+        if (!me.optString("email").isEmpty()) ed.putString(KEY_ACCOUNT, me.optString("email"));
+        ed.apply();
+        String pic = me.optString("picture", "");
+        if (pic.isEmpty()) return;
+        Bitmap b = GoogleProfile.photo(pic);
+        if (b == null) return;
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(googlePhotoFile())) {
+            b.compress(Bitmap.CompressFormat.PNG, 100, out);
+        }
+    }
+
     private void refreshAvatar() {
         if (avatar == null) return;
         readGoogleAccount();
         File dir = getExternalFilesDir(null);
         File photo = null;
-        if (dir != null) for (String n : new String[]{"avatar.jpg", "avatar.png", "avatar.webp"}) {
+        File g = googlePhotoFile();
+        if (g.isFile()) photo = g; // synced from Google wins
+        if (photo == null && dir != null) for (String n : new String[]{"avatar.jpg", "avatar.png", "avatar.webp"}) {
             File f = new File(dir, n);
             if (f.isFile()) { photo = f; break; }
         }
@@ -894,11 +1006,25 @@ public class HomeActivity extends Activity {
             first = menuButton(list, "👤   Show my Google account", () ->
                     requestPermissions(new String[]{android.Manifest.permission.GET_ACCOUNTS}, REQ_ACCOUNTS_PERM), d);
         }
-        View nameBtn = menuButton(list, "✎   " + (name.isEmpty() ? "Set your name" : "Change name"), this::editName, d);
-        if (first == null) first = nameBtn;
+        // Google photo sync (sign-in on the phone at google.com/device)
+        boolean signedIn = !prefs().getString(KEY_G_REFRESH, "").isEmpty();
+        View gBtn;
+        if (!signedIn) {
+            gBtn = menuButton(list, "G   Sign in with Google (photo)", this::startGoogleSignIn, d);
+        } else {
+            gBtn = menuButton(list, "↻   Update Google photo now", () -> syncGooglePhoto(true), d);
+            menuButton(list, "⎋   Stop Google photo sync", () -> {
+                prefs().edit().remove(KEY_G_REFRESH).remove(KEY_G_SYNCED_AT).apply();
+                googlePhotoFile().delete();
+                refreshAvatar();
+            }, d);
+        }
+        if (first == null) first = gBtn;
+        menuButton(list, "✎   " + (name.isEmpty() ? "Set your name" : "Change name"), this::editName, d);
         menuButton(list, "⚙   Accounts (Settings)", () -> safeStart(new Intent(Settings.ACTION_SETTINGS)), d);
         menuButton(list, "✕   Close", null, d);
-        TextView tip = ui.text("Other apps can't read your Google profile photo.\nTo show it here, run scripts\\set-avatar.ps1 once on the PC.", 11, Ui.MUTED, Ui.REGULAR);
+        TextView tip = ui.text(signedIn ? "Your Google photo updates automatically every few hours."
+                : "Signing in lets this home screen read only your Google name and photo.", 11, Ui.MUTED, Ui.REGULAR);
         tip.setLineSpacing(ui.px(2), 1f);
         addWithTop(panel, tip, 14);
         d.show();
