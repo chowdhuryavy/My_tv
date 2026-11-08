@@ -147,6 +147,8 @@ public class HomeActivity extends Activity {
             String who = displayName();
             greeting.setText(who.isEmpty() ? hello : hello + ", " + who);
             if (System.currentTimeMillis() - lastWeatherAt > WEATHER_EVERY_MS) loadWeather();
+            // Auto theme: switch when the time of day moves into the next band
+            if (prefs().getInt(KEY_THEME, 0) == Ui.AUTO && Ui.resolveTheme(Ui.AUTO) != appliedTheme) applyTheme();
             handler.postDelayed(this, 15_000);
         }
     };
@@ -532,9 +534,21 @@ public class HomeActivity extends Activity {
         parent.addView(v, lp);
     }
 
+    /** Theme actually shown (Auto resolves by time of day); re-checked by the clock tick. */
+    private int appliedTheme = -1;
+
+    /** Cycle Aurora → Ocean → … → Rose → Auto → Aurora. */
+    private void nextTheme() {
+        int t = prefs().getInt(KEY_THEME, 0);
+        prefs().edit().putInt(KEY_THEME, (Math.floorMod(t, Ui.THEMES.length + 1) + 1) % (Ui.THEMES.length + 1)).apply();
+    }
+
     private void applyTheme() {
         int t = prefs().getInt(KEY_THEME, 0);
-        Bitmap b = Ui.backdrop(t);
+        int resolved = Ui.resolveTheme(t);
+        appliedTheme = resolved;
+        Ui.accent = Ui.accentFor(resolved);
+        Bitmap b = Ui.backdrop(resolved);
         Drawable old = backdrop.getDrawable();
         if (old instanceof TransitionDrawable) old = ((TransitionDrawable) old).getDrawable(1);
         if (old == null) {
@@ -674,7 +688,7 @@ public class HomeActivity extends Activity {
             {"🌙   Screen saver", new Intent("com.google.android.tv.settings.ambient")},
             {"🎮   Remote buttons", (Runnable) this::showRemoteButtons},
             {"🎨   Change theme", (Runnable) () -> {
-                prefs().edit().putInt(KEY_THEME, prefs().getInt(KEY_THEME, 0) + 1).apply();
+                nextTheme();
                 applyTheme();
             }},
             {"⚙   All settings", new Intent(Settings.ACTION_SETTINGS)},
@@ -1292,7 +1306,7 @@ public class HomeActivity extends Activity {
     }
 
     private void updateThemeLabel() {
-        if (themeTile != null) themeTile.setText(Ui.THEMES[Math.floorMod(prefs().getInt(KEY_THEME, 0), Ui.THEMES.length)] + " theme");
+        if (themeTile != null) themeTile.setText(Ui.themeName(prefs().getInt(KEY_THEME, 0)) + " theme");
     }
 
     // =================================================================== apps
@@ -1354,7 +1368,7 @@ public class HomeActivity extends Activity {
         View themeBox = actionTile("🎨", "Theme", null);
         themeTile = (TextView) ((ViewGroup) themeBox).getChildAt(1);
         ((ViewGroup) themeBox).getChildAt(0).setOnClickListener(v -> {
-            prefs().edit().putInt(KEY_THEME, prefs().getInt(KEY_THEME, 0) + 1).apply();
+            nextTheme();
             applyTheme();
         });
         sys.addView(themeBox);
@@ -1435,7 +1449,9 @@ public class HomeActivity extends Activity {
             v.animate().scaleX(s).scaleY(s).translationY(has ? -ui.px(2) : 0)
                     .setInterpolator(has ? new OvershootInterpolator(2.2f) : new DecelerateInterpolator())
                     .setDuration(has ? 260 : 160).start();
-            v.setElevation(has ? ui.px(10) : 0);
+            v.setElevation(has ? ui.px(16) : 0);
+            v.setOutlineSpotShadowColor(Ui.accent);    // focused icon glows in the theme colour
+            v.setOutlineAmbientShadowColor(Ui.accent);
             label.setTextColor(has ? Ui.WHITE : Ui.MUTED);
             label.animate().translationY(has ? ui.px(4) : 0).setDuration(140).start();
             highlightRowTitle(box, has);
@@ -1567,7 +1583,7 @@ public class HomeActivity extends Activity {
             ViewGroup rows = (ViewGroup) hs.getParent();
             View title = rows.getChildAt(rows.indexOfChild(hs) - 1);
             if (!(title instanceof TextView)) return;
-            ((TextView) title).setTextColor(on ? Ui.WHITE : Ui.SOFT);
+            ((TextView) title).setTextColor(on ? Ui.accent : Ui.SOFT);
             title.animate().translationX(on ? ui.px(8) : 0).setDuration(220)
                     .setInterpolator(new DecelerateInterpolator()).start();
         } catch (Exception ignored) { } // tile temporarily detached while moving

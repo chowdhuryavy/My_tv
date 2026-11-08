@@ -29,13 +29,40 @@ final class Ui {
     static final int AMBER = 0xFFFFB547;
     static final int RED = 0xFFFF5C7A;
 
-    static final String[] THEMES = {"Aurora", "Ocean", "Sunset", "Forest"};
+    /** Theme names; the extra last slot (index THEMES.length) is "Auto" (changes with the time of day). */
+    static final String[] THEMES = {"Aurora", "Ocean", "Sunset", "Forest", "Midnight", "Neon", "Rose"};
+    static final int AUTO = THEMES.length;
+    // {base, colour A, colour B, colour C}
     private static final int[][] PALETTES = {
-        {0xFF0B1026, 0xFF7B5CFF, 0xFF00C6FF, 0xFFFF4FA3},
-        {0xFF02121F, 0xFF0077B6, 0xFF00B4D8, 0xFF5E60CE},
-        {0xFF170A1C, 0xFFFF7A59, 0xFFFF3D77, 0xFF7B2CBF},
-        {0xFF06140F, 0xFF2D6A4F, 0xFF52B788, 0xFF1B4965},
+        {0xFF0B1026, 0xFF7B5CFF, 0xFF00C6FF, 0xFFFF4FA3},   // Aurora
+        {0xFF02121F, 0xFF0077B6, 0xFF00B4D8, 0xFF5E60CE},   // Ocean
+        {0xFF170A1C, 0xFFFF7A59, 0xFFFF3D77, 0xFF7B2CBF},   // Sunset
+        {0xFF06140F, 0xFF2D6A4F, 0xFF52B788, 0xFF1B4965},   // Forest
+        {0xFF03060F, 0xFF1B2A6B, 0xFF3A1F6E, 0xFF0E5A7A},   // Midnight (+ stars)
+        {0xFF07020F, 0xFFFF2E93, 0xFF00E5FF, 0xFF7C4DFF},   // Neon
+        {0xFF1A0E14, 0xFFE8A0A8, 0xFFB76E79, 0xFF6D3B5A},   // Rose
     };
+    /** Accent per theme: focus glow, row titles. */
+    private static final int[] ACCENTS = {
+        0xFFA996FF, 0xFF4DD0E1, 0xFFFF9E80, 0xFF8BE0A4, 0xFF8AB4FF, 0xFFFF4FD8, 0xFFFFB3C1,
+    };
+
+    /** Current accent colour (set when a theme is applied). */
+    static int accent = 0xFFA996FF;
+
+    static String themeName(int t) { return t == AUTO ? "Auto" : THEMES[Math.floorMod(t, THEMES.length)]; }
+
+    /** Auto: Rose in the morning, Ocean by day, Sunset in the evening, Midnight at night. */
+    static int resolveTheme(int t) {
+        if (t != AUTO) return Math.floorMod(t, THEMES.length);
+        int h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        if (h >= 5 && h < 10) return 6;    // Rose
+        if (h >= 10 && h < 17) return 1;   // Ocean
+        if (h >= 17 && h < 21) return 2;   // Sunset
+        return 4;                          // Midnight
+    }
+
+    static int accentFor(int resolved) { return ACCENTS[Math.floorMod(resolved, ACCENTS.length)]; }
 
     final Context c;
     final float dp;
@@ -173,24 +200,82 @@ final class Ui {
     }
 
     /** Soft "aurora" backdrop rendered at low resolution; scaling up keeps it smooth and cheap. */
-    static Bitmap backdrop(int theme) {
-        int[] p = PALETTES[Math.floorMod(theme, PALETTES.length)];
-        int w = 480, h = 270;
+    /**
+     * Theme backdrop: a deep base gradient, soft overlapping colour "mesh" blobs, two
+     * diagonal light streaks, optional starfield (Midnight), fine film grain and a vignette.
+     * Rendered small (640x360) and scaled up: smooth, cheap on memory.
+     */
+    static Bitmap backdrop(int resolved) {
+        int idx = Math.floorMod(resolved, PALETTES.length);
+        int[] p = PALETTES[idx];
+        int w = 640, h = 360;
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(b);
-        cv.drawColor(p[0]);
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+
+        // 1. base: slightly lighter at the top-left, deeper at the bottom-right
+        paint.setShader(new LinearGradient(0, 0, w, h, lighten(p[0], 0.10f), p[0], Shader.TileMode.CLAMP));
+        cv.drawRect(0, 0, w, h, paint);
+
+        // 2. colour mesh: large soft blobs, then smaller brighter cores
         float[][] blobs = {
-            {0.12f, 0.18f, 0.55f}, {0.88f, 0.22f, 0.50f}, {0.52f, 1.00f, 0.62f}, {1.02f, 0.92f, 0.38f}, {0.30f, 0.70f, 0.30f}
+            {0.10f, 0.15f, 0.60f, 0.70f}, {0.90f, 0.18f, 0.55f, 0.65f}, {0.55f, 1.05f, 0.70f, 0.70f},
+            {1.05f, 0.95f, 0.45f, 0.60f}, {0.32f, 0.62f, 0.34f, 0.45f}, {0.70f, 0.45f, 0.28f, 0.35f},
         };
         for (int i = 0; i < blobs.length; i++) {
             int col = p[1 + (i % 3)];
             float x = blobs[i][0] * w, y = blobs[i][1] * h, r = blobs[i][2] * w;
-            paint.setShader(new RadialGradient(x, y, r, (col & 0x00FFFFFF) | 0xA6000000, col & 0x00FFFFFF, Shader.TileMode.CLAMP));
+            int a = (int) (blobs[i][3] * 255);
+            paint.setShader(new RadialGradient(x, y, r, new int[]{(col & 0xFFFFFF) | (a << 24), (col & 0xFFFFFF) | ((a / 3) << 24), col & 0xFFFFFF},
+                    new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
             cv.drawCircle(x, y, r, paint);
         }
-        paint.setShader(new LinearGradient(0, 0, 0, h, 0x14000000, 0x8C000000, Shader.TileMode.CLAMP));
+
+        // 3. two soft diagonal light streaks
+        cv.save();
+        cv.rotate(-28, w / 2f, h / 2f);
+        for (float[] s : new float[][]{{0.30f, 0.10f}, {0.62f, 0.06f}}) {
+            float cx = s[0] * w, half = s[1] * w;
+            paint.setShader(new LinearGradient(cx - half, 0, cx + half, 0,
+                    new int[]{0x00FFFFFF, 0x16FFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP));
+            cv.drawRect(cx - half, -h, cx + half, h * 2, paint);
+        }
+        cv.restore();
+        paint.setShader(null);
+
+        java.util.Random rnd = new java.util.Random(42 + idx);
+        // 4. starfield for Midnight
+        if (idx == 4) {
+            for (int i = 0; i < 260; i++) {
+                float sx = rnd.nextFloat() * w, sy = rnd.nextFloat() * h * 0.8f;
+                float sr = rnd.nextFloat() < 0.08f ? 1.3f : 0.6f;
+                paint.setColor(((int) (90 + rnd.nextInt(165)) << 24) | 0xFFFFFF);
+                cv.drawCircle(sx, sy, sr, paint);
+            }
+        }
+
+        // 5. fine film grain (breaks up banding on big TVs)
+        float[] pts = new float[2 * 7000];
+        for (int i = 0; i < pts.length; i += 2) { pts[i] = rnd.nextFloat() * w; pts[i + 1] = rnd.nextFloat() * h; }
+        paint.setStrokeWidth(1f);
+        paint.setColor(0x0DFFFFFF);
+        cv.drawPoints(pts, 0, pts.length / 2, paint);
+        for (int i = 0; i < pts.length; i += 2) { pts[i] = rnd.nextFloat() * w; pts[i + 1] = rnd.nextFloat() * h; }
+        paint.setColor(0x14000000);
+        cv.drawPoints(pts, 0, pts.length / 2, paint);
+
+        // 6. vignette + darker bottom so text and icons stay readable
+        paint.setShader(new RadialGradient(w / 2f, h * 0.42f, w * 0.75f,
+                new int[]{0x00000000, 0x00000000, 0x80000000}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+        cv.drawRect(0, 0, w, h, paint);
+        paint.setShader(new LinearGradient(0, h * 0.55f, 0, h, 0x00000000, 0x66000000, Shader.TileMode.CLAMP));
         cv.drawRect(0, 0, w, h, paint);
         return b;
+    }
+
+    private static int lighten(int c, float f) {
+        int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, bl = c & 0xFF;
+        r = (int) (r + (255 - r) * f); g = (int) (g + (255 - g) * f); bl = (int) (bl + (255 - bl) * f);
+        return 0xFF000000 | (r << 16) | (g << 8) | bl;
     }
 }

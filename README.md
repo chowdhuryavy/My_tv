@@ -6,7 +6,7 @@ The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB
 
 ## Features
 
-- **Glass theme:** a soft colour backdrop with frosted-glass cards. Choose from Aurora, Ocean, Sunset or Forest with the **Theme** tile in the *System* row.
+- **Glass theme:** a soft colour backdrop with frosted-glass cards. Themes: **Aurora, Ocean, Sunset, Forest, Midnight** (starfield), **Neon, Rose**, or **Auto** (Rose mornings, Ocean by day, Sunset evenings, Midnight at night). Backgrounds have soft colour mesh, light streaks, film grain and a vignette; each theme has an accent colour for the focus glow and row titles. Change it with the **Theme** tile in the *System* row or ⚙ → Change theme.
 - **Clock** with a greeting and the date.
 - **Live weather** from [Open-Meteo](https://open-meteo.com): temperature, feels-like, high/low, humidity, wind and a 3-day forecast. The location is detected automatically, and it refreshes every 30 minutes.
 - **Subscription tracker, managed on the TV:**
