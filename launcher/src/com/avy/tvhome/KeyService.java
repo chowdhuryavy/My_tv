@@ -32,8 +32,8 @@ public class KeyService extends AccessibilityService {
         switch (c) {
             case KeyEvent.KEYCODE_DPAD_UP: case KeyEvent.KEYCODE_DPAD_DOWN: case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_DPAD_RIGHT: case KeyEvent.KEYCODE_DPAD_CENTER: case KeyEvent.KEYCODE_ENTER:
-            case KeyEvent.KEYCODE_BACK: case KeyEvent.KEYCODE_HOME: case KeyEvent.KEYCODE_VOLUME_UP:
-            case KeyEvent.KEYCODE_VOLUME_DOWN: case KeyEvent.KEYCODE_VOLUME_MUTE: case KeyEvent.KEYCODE_POWER:
+            case KeyEvent.KEYCODE_BACK: case KeyEvent.KEYCODE_HOME:
+            case KeyEvent.KEYCODE_VOLUME_MUTE: case KeyEvent.KEYCODE_POWER:
             case KeyEvent.KEYCODE_TV_POWER: case KeyEvent.KEYCODE_SLEEP: case KeyEvent.KEYCODE_WAKEUP:
             case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE: case KeyEvent.KEYCODE_MEDIA_PLAY: case KeyEvent.KEYCODE_MEDIA_PAUSE:
             case KeyEvent.KEYCODE_MEDIA_STOP: case KeyEvent.KEYCODE_MEDIA_NEXT: case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
@@ -51,7 +51,10 @@ public class KeyService extends AccessibilityService {
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
         if (down && e.getRepeatCount() == 0) {
             Log.i(TAG, "key " + code + " " + KeyEvent.keyCodeToString(code) + " scan=" + e.getScanCode());
+        } else if (down && e.getRepeatCount() % 5 == 0) {
+            Log.i(TAG, "held " + KeyEvent.keyCodeToString(code) + " repeat=" + e.getRepeatCount());
         }
+        if (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN) return handleVolume(e);
         if (isReserved(code)) return false;
 
         Learner l = learner;
@@ -65,6 +68,55 @@ public class KeyService extends AccessibilityService {
         if (pkg == null) return false;
         if (e.getAction() == KeyEvent.ACTION_UP) launch(pkg);
         return true; // swallow both down and up so nothing else reacts
+    }
+
+    // ------------------------------------------------------------------ volume
+
+    /*
+     * While key filtering is on, this TV stops repeating held buttons, so holding
+     * Volume +/- only moved one step. The helper now does volume itself: one step on
+     * press, then keeps stepping every 120 ms after a short pause until the button is
+     * released (on-screen volume bar shown as usual).
+     */
+    private final android.os.Handler volHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private int volDir = 0;
+    private final Runnable volRepeat = new Runnable() {
+        @Override public void run() {
+            if (volDir == 0) return;
+            stepVolume(volDir);
+            volHandler.postDelayed(this, 120);
+        }
+    };
+
+    private boolean handleVolume(KeyEvent e) {
+        int dir = e.getKeyCode() == KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1;
+        if (e.getAction() == KeyEvent.ACTION_DOWN) {
+            if (e.getRepeatCount() == 0) {
+                volDir = dir;
+                stepVolume(dir);
+                volHandler.removeCallbacks(volRepeat);
+                volHandler.postDelayed(volRepeat, 400);
+            }
+            // hardware repeats (if any) are ignored: our own timer already repeats
+        } else if (e.getAction() == KeyEvent.ACTION_UP) {
+            volDir = 0;
+            volHandler.removeCallbacks(volRepeat);
+        }
+        return true;
+    }
+
+    private void stepVolume(int dir) {
+        android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) return;
+        am.adjustSuggestedStreamVolume(dir > 0 ? android.media.AudioManager.ADJUST_RAISE : android.media.AudioManager.ADJUST_LOWER,
+                android.media.AudioManager.USE_DEFAULT_STREAM_TYPE, android.media.AudioManager.FLAG_SHOW_UI);
+    }
+
+    @Override
+    public boolean onUnbind(Intent intent) {
+        volDir = 0;
+        volHandler.removeCallbacks(volRepeat);
+        return super.onUnbind(intent);
     }
 
     /**
