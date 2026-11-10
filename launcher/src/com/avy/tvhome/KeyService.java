@@ -50,11 +50,7 @@ public class KeyService extends AccessibilityService {
     protected boolean onKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
-        if (down && e.getRepeatCount() == 0) {
-            Log.i(TAG, "key " + code + " " + KeyEvent.keyCodeToString(code) + " scan=" + e.getScanCode());
-        } else if (down && e.getRepeatCount() % 5 == 0) {
-            Log.i(TAG, "held " + KeyEvent.keyCodeToString(code) + " repeat=" + e.getRepeatCount());
-        }
+        // Privacy: individual key presses (e.g. a PIN typed in another app) are never logged.
         if (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN) return handleVolume(e);
         if (isReserved(code)) return false;
 
@@ -65,7 +61,7 @@ public class KeyService extends AccessibilityService {
         }
 
         String pkg = mapped(code);
-        if (down && e.getRepeatCount() == 0) Log.i(TAG, "  -> " + (pkg == null ? "not mapped, passing through" : "opening " + pkg));
+        if (down && e.getRepeatCount() == 0 && pkg != null) Log.i(TAG, "app button -> opening " + pkg);
         if (pkg == null) return false;
         if (e.getAction() == KeyEvent.ACTION_UP) launch(pkg);
         return true; // swallow both down and up so nothing else reacts

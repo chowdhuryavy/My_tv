@@ -322,9 +322,10 @@ public class HomeActivity extends Activity {
         try {
             JSONObject in = new JSONObject(new String(Base64.decode(b64, Base64.DEFAULT), StandardCharsets.UTF_8));
             JSONObject cfg = config();
-            for (Iterator<String> it = in.keys(); it.hasNext(); ) {
-                String k = it.next();
-                cfg.put(k, in.get(k));
+            // Only these settings can be pushed in from outside (any app on the TV can start the
+            // home screen, so subscriptions and everything else are never taken from an intent).
+            for (String k : new String[]{"city", "name", "google_client_id", "google_client_secret"}) {
+                if (in.has(k) && in.get(k) instanceof String && in.getString(k).length() <= 300) cfg.put(k, in.getString(k));
             }
             putJson(KEY_CONFIG, cfg);
             return true;
@@ -1343,7 +1344,8 @@ public class HomeActivity extends Activity {
                     showUpdateChip();
                     if (newer && (manual || !prefs().getBoolean("update_prompted_" + tag, false))) {
                         prefs().edit().putBoolean("update_prompted_" + tag, true).apply();
-                        showUpdateDialog();
+                        if (manual || canShowPopup()) showUpdateDialog();
+                        else prefs().edit().putBoolean("update_prompted_" + tag, false).apply(); // show it next time
                     } else if (manual && !newer) {
                         Toast.makeText(this, "You have the latest version (v" + appVersion() + ")", Toast.LENGTH_LONG).show();
                     }
@@ -1379,7 +1381,7 @@ public class HomeActivity extends Activity {
     }
 
     private void showUpdateDialog() {
-        if (!updateAvailable()) return;
+        if (!updateAvailable() || isFinishing() || isDestroyed()) return;
         final String tag = prefs().getString(KEY_UPD_TAG, "");
         LinearLayout panel = panel();
         panel.addView(ui.text("Update available", 24, Ui.WHITE, Ui.MEDIUM));
@@ -1458,6 +1460,18 @@ public class HomeActivity extends Activity {
                 } finally { c.disconnect(); }
                 if (apk.length() < 10_000) throw new Exception("download was incomplete");
                 runOnUiThread(() -> status.setText("Installing… the home screen restarts in a moment."));
+                try {
+                    verifyUpdate(apk);
+                } catch (Exception bad) { // never install something that isn't our own signed update
+                    apk.delete();
+                    final String why = bad.getMessage();
+                    runOnUiThread(() -> {
+                        if (d.isShowing()) d.dismiss();
+                        updating = false;
+                        Toast.makeText(this, "Update not installed: " + why, Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
                 installSilently(apk);
                 // If we're still running a while later, the silent install didn't happen.
                 Thread.sleep(25_000);
@@ -1468,11 +1482,36 @@ public class HomeActivity extends Activity {
                 runOnUiThread(() -> {
                     if (d.isShowing()) d.dismiss();
                     updating = false;
+                    if (isFinishing() || isDestroyed()) return;
                     if (f != null && f.isFile() && f.length() >= 10_000) installWithInstaller(f);
                     else Toast.makeText(this, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 });
             }
         }).start();
+    }
+
+    /** True when it's safe to pop up something on our own: home screen in front, nothing else open. */
+    private boolean canShowPopup() {
+        return !isFinishing() && !isDestroyed() && hasWindowFocus();
+    }
+
+    /**
+     * Safety check before installing: the download must be this same app (same package)
+     * signed with the same key as the version that's installed. Anything else is refused.
+     */
+    @SuppressWarnings("deprecation")
+    private void verifyUpdate(File apk) throws Exception {
+        PackageManager pm = getPackageManager();
+        android.content.pm.PackageInfo in = pm.getPackageArchiveInfo(apk.getAbsolutePath(), PackageManager.GET_SIGNATURES);
+        if (in == null) throw new Exception("the download isn't a valid app");
+        if (!getPackageName().equals(in.packageName)) throw new Exception("the download is a different app");
+        android.content.pm.Signature[] mine = pm.getPackageInfo(getPackageName(), PackageManager.GET_SIGNATURES).signatures;
+        if (in.signatures == null || in.signatures.length == 0 || !java.util.Arrays.equals(in.signatures, mine)) {
+            throw new Exception(isOfficialBuild()
+                    ? "the download isn't signed with the official key"
+                    : "this TV has a build signed with another key: uninstall it once, then install the new version");
+        }
+        if (in.versionCode <= pm.getPackageInfo(getPackageName(), 0).versionCode) throw new Exception("the download isn't newer");
     }
 
     /** pm install -r through the TV's own debugging service; runs detached so it survives this app restarting. */
@@ -1716,6 +1755,7 @@ public class HomeActivity extends Activity {
 
     /** When another home screen is still the default, offer once to switch (also in ⚙ menu). */
     private void maybeOfferDefaultHome() {
+        if (!canShowPopup()) return;
         if (settingsWatch || prefs().getBoolean(KEY_GL_ON, false)) return;
         if (prefs().getBoolean(KEY_HOME_ASKED, false) || isDefaultHome()) return;
         prefs().edit().putBoolean(KEY_HOME_ASKED, true).apply();
@@ -2579,8 +2619,10 @@ public class HomeActivity extends Activity {
                     .setInterpolator(has ? new OvershootInterpolator(2.2f) : new DecelerateInterpolator())
                     .setDuration(has ? 260 : 160).start();
             v.setElevation(has ? ui.px(16) : 0);
-            v.setOutlineSpotShadowColor(Ui.accent);    // focused icon glows in the theme colour
-            v.setOutlineAmbientShadowColor(Ui.accent);
+            if (android.os.Build.VERSION.SDK_INT >= 28) { // focused icon glows in the theme colour (Android 9+)
+                v.setOutlineSpotShadowColor(Ui.accent);
+                v.setOutlineAmbientShadowColor(Ui.accent);
+            }
             label.setTextColor(has ? Ui.WHITE : Ui.MUTED);
             label.animate().translationY(has ? ui.px(4) : 0).setDuration(140).start();
             highlightRowTitle(box, has);
