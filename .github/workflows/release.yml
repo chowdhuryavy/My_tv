@@ -73,7 +73,7 @@ jobs:
               echo "::error::The SIGNING_KEYSTORE secret isn't valid. Paste the whole SIGNING_KEYSTORE.txt contents again."
               exit 1
             fi
-            FP=$(keytool -list -v -keystore out/key.jks -storepass android -alias avy 2>/dev/null | grep -m1 'SHA256:' | tr -d ' :' | sed 's/SHA256//')
+            FP=$(keytool -list -v -keystore out/key.jks -storepass android -alias avy 2>/dev/null | grep -m1 'SHA256:' | tr -d ' :\t' | sed 's/SHA256//')
             if [ "$FP" != "2DFBA87097DEFA6F46EA5673CEB70079B1CF2374F43110AD96B1C217FFA7AF6E" ]; then
               echo "::error::SIGNING_KEYSTORE doesn't contain Avy's key (fingerprint $FP)."
               exit 1
