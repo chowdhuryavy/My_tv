@@ -108,6 +108,10 @@ public class HomeActivity extends Activity {
     private View heroView, heroWeatherCard;
     private TextView heroClock, heroAmPm, heroGreeting, heroDate, heroWIcon, heroTemp, heroDesc, heroForecast;
     private ObjectAnimator heroFloat, heroGlow;
+    // "designed by Avy" signature, bottom right
+    private TextView signature;
+    private ValueAnimator signatureShimmer;
+    private ObjectAnimator signatureBreath;
     private int gearId;
     // Customize settings
     private static final String KEY_WALL = "wallpaper_on", KEY_WALL_BLUR = "wallpaper_blur", KEY_WALL_DIM = "wallpaper_dim";
@@ -547,6 +551,24 @@ public class HomeActivity extends Activity {
         FrameLayout.LayoutParams hlp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         hlp.bottomMargin = ui.px(22);
         root.addView(hintBar, hlp);
+
+        // ---- signature: small "designed by" + handwritten "Avy", with a shimmer that sweeps across
+        android.text.SpannableStringBuilder sig = new android.text.SpannableStringBuilder("designed by  ");
+        sig.setSpan(new android.text.style.RelativeSizeSpan(0.82f), 0, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sig.setSpan(new android.text.style.TypefaceSpan("sans-serif-light"), 0, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        int start = sig.length();
+        sig.append("Avy");
+        sig.setSpan(new android.text.style.TypefaceSpan("cursive"), start, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sig.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sig.setSpan(new android.text.style.RelativeSizeSpan(1.55f), start, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        signature = ui.text("", 13, Ui.WHITE, Ui.REGULAR);
+        signature.setText(sig);
+        signature.setLetterSpacing(0.06f);
+        signature.setShadowLayer(ui.px(8), 0, 0, 0x66000000);
+        FrameLayout.LayoutParams sglp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
+        sglp.rightMargin = ui.px(30);
+        sglp.bottomMargin = ui.px(8);
+        root.addView(signature, sglp);
         return root;
     }
 
@@ -629,6 +651,8 @@ public class HomeActivity extends Activity {
             heroGlow.start();
         }
 
+        startSignatureShimmer();
+
         // light particles rise slowly from the bottom, twinkling, each on its own rhythm
         int h = getResources().getDisplayMetrics().heightPixels;
         java.util.Random rnd = new java.util.Random();
@@ -663,6 +687,8 @@ public class HomeActivity extends Activity {
         if (drift != null) drift.cancel();
         if (iconFloat != null) iconFloat.cancel();
         if (heroFloat != null) heroFloat.cancel();
+        if (signatureShimmer != null) signatureShimmer.cancel();
+        if (signatureBreath != null) signatureBreath.cancel();
         if (heroGlow != null) heroGlow.cancel();
         for (Animator a : pulses) a.cancel();
         for (Animator a : particleAnims) a.cancel();
@@ -678,6 +704,14 @@ public class HomeActivity extends Activity {
         slideIn(gearButton, ui.px(40), 0, 110, dec);
         slideIn(avatar, ui.px(40), 0, 140, dec);
         slideIn(subsCard, 0, -ui.px(16), 200, dec);
+        if (signature != null) {
+            signature.setAlpha(0f);
+            signature.setScaleX(0.7f);
+            signature.setScaleY(0.7f);
+            signature.setTranslationX(ui.px(30));
+            signature.animate().alpha(0.85f).scaleX(1f).scaleY(1f).translationX(0).setStartDelay(650).setDuration(900)
+                    .setInterpolator(new OvershootInterpolator(1.4f)).start();
+        }
         if (heroView != null && heroView.getVisibility() == View.VISIBLE) {
             slideIn(heroClock, -ui.px(40), 0, 40, dec);
             slideIn(heroWeatherCard, ui.px(50), 0, 120, dec);
@@ -927,6 +961,37 @@ public class HomeActivity extends Activity {
         panel.addView(close, clp);
         d.show();
         first.requestFocus();
+    }
+
+    /** A bright band in the theme's accent colour sweeps across the signature every few seconds; it also breathes softly. */
+    private void startSignatureShimmer() {
+        if (signature == null) return;
+        signature.post(() -> {
+            final float w = Math.max(1, signature.getWidth());
+            final android.graphics.Matrix m = new android.graphics.Matrix();
+            final android.graphics.LinearGradient shine = new android.graphics.LinearGradient(0, 0, w * 0.6f, 0,
+                    new int[]{0xD9FFFFFF, Ui.accent, 0xFFFFFFFF, Ui.accent, 0xD9FFFFFF},
+                    new float[]{0f, 0.35f, 0.5f, 0.65f, 1f}, android.graphics.Shader.TileMode.CLAMP);
+            signature.getPaint().setShader(shine);
+            signatureShimmer = ValueAnimator.ofFloat(-w * 0.7f, w * 1.1f);
+            signatureShimmer.setDuration(2400);
+            signatureShimmer.setStartDelay(1500);
+            signatureShimmer.setRepeatCount(ValueAnimator.INFINITE);
+            signatureShimmer.setRepeatMode(ValueAnimator.RESTART);
+            signatureShimmer.setInterpolator(new AccelerateDecelerateInterpolator());
+            signatureShimmer.addUpdateListener(a -> {
+                m.setTranslate((float) a.getAnimatedValue(), 0);
+                shine.setLocalMatrix(m);
+                signature.invalidate();
+            });
+            signatureShimmer.start();
+        });
+        signatureBreath = ObjectAnimator.ofFloat(signature, View.TRANSLATION_Y, 0f, -ui.px(3));
+        signatureBreath.setDuration(3200);
+        signatureBreath.setRepeatCount(ValueAnimator.INFINITE);
+        signatureBreath.setRepeatMode(ValueAnimator.REVERSE);
+        signatureBreath.setInterpolator(new AccelerateDecelerateInterpolator());
+        signatureBreath.start();
     }
 
     /** e.g. "3.7.12" (set by the GitHub build from the build number). */
