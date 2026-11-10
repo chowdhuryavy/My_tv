@@ -32,10 +32,18 @@ jobs:
 
           rm -rf out && mkdir -p out/gen out/classes out/dex
 
+          # Version: major.minor from AndroidManifest.xml + this build's number, e.g. 3.7.12
+          BASE=$(grep -o 'versionName="[^"]*"' AndroidManifest.xml | cut -d'"' -f2 | cut -d. -f1,2)
+          VERSION="$BASE.${{ github.run_number }}"
+          CODE=$((1000 + ${{ github.run_number }}))
+          echo "Version: v$VERSION (code $CODE)"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
           # 1. Resources
           $BT/aapt2 compile --dir res -o out/res.zip
           $BT/aapt2 link -I $JAR --manifest AndroidManifest.xml \
             --min-sdk-version 25 --target-sdk-version 25 \
+            --version-name "$VERSION" --version-code "$CODE" --replace-version \
             --java out/gen -o out/base.apk out/res.zip
 
           # 2. Java -> classes
@@ -58,11 +66,18 @@ jobs:
           $BT/apksigner sign --ks out/key.jks --ks-pass pass:android \
             --key-pass pass:android --out ../TvHome.apk out/aligned.apk
           $BT/apksigner verify ../TvHome.apk
-          echo "APK built successfully"
+          cp ../TvHome.apk "../TvHome-v$VERSION.apk"
+          echo "APK v$VERSION built successfully"
 
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: apk
-          name: TV Home APK
+          tag_name: v${{ env.VERSION }}
+          name: Avy TV Home v${{ env.VERSION }}
+          body: |
+            Avy TV Home **v${{ env.VERSION }}**, built from ${{ github.sha }}.
+            Install link (always the newest): https://github.com/${{ github.repository }}/releases/latest/download/TvHome.apk
+            On the TV, the version is shown in ⚙ Quick settings.
           make_latest: true
-          files: TvHome.apk
+          files: |
+            TvHome.apk
+            TvHome-v${{ env.VERSION }}.apk

@@ -851,7 +851,7 @@ public class HomeActivity extends Activity {
     private void showCustomize() {
         LinearLayout panel = panel();
         panel.addView(ui.text("Customize", 24, Ui.WHITE, Ui.MEDIUM));
-        addWithTop(panel, ui.text("Changes apply right away.", 13, Ui.MUTED, Ui.REGULAR), 4);
+        addWithTop(panel, ui.text("Changes apply right away.   ·   Avy TV Home v" + appVersion(), 13, Ui.MUTED, Ui.REGULAR), 4);
         final Dialog d = dialog(panel);
         final String[] blur = {"None", "Soft", "Strong"}, dim = {"Light", "Medium", "Dark"};
         Object[][] items = {
@@ -927,6 +927,15 @@ public class HomeActivity extends Activity {
         panel.addView(close, clp);
         d.show();
         first.requestFocus();
+    }
+
+    /** e.g. "3.7.12" (set by the GitHub build from the build number). */
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
     }
 
     private void restartClock() {
@@ -1163,7 +1172,14 @@ public class HomeActivity extends Activity {
 
     private void showQuickSettings() {
         LinearLayout panel = panel();
-        panel.addView(ui.text("Quick settings", 24, Ui.WHITE, Ui.MEDIUM));
+        LinearLayout qsHead = new LinearLayout(this);
+        qsHead.setOrientation(LinearLayout.HORIZONTAL);
+        qsHead.setGravity(Gravity.BOTTOM);
+        qsHead.addView(ui.text("Quick settings", 24, Ui.WHITE, Ui.MEDIUM), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView ver = ui.text("Avy TV Home  v" + appVersion(), 13, Ui.accent, Ui.MEDIUM);
+        ver.setPadding(ui.px(24), 0, 0, ui.px(2));
+        qsHead.addView(ver);
+        panel.addView(qsHead, new LinearLayout.LayoutParams(-1, -2));
         final Dialog d = dialog(panel);
         Object[][] items = {
             {"📶   Wi-Fi", new Intent(Settings.ACTION_WIFI_SETTINGS)},
