@@ -108,7 +108,9 @@ Every push to `main` builds the APK on GitHub and publishes a release named afte
 2. Install the APK with the **Downloader** app (open the link above and select the .apk) or from a phone with **Bugjaeger**.
 3. Open **Avy TV Home**. If another home screen is still the default, it offers **Make default**. You can also use **⚙ → Make Avy my Home**. On "Allow USB debugging?", tick **Always allow** and press **Allow**.
 
-GitHub builds are signed with a new key each time, so uninstall the old version before installing an update.
+**Updates on the TV:** Avy checks GitHub for a newer release every hour (and each time you return Home). When one exists, a glowing **⬆ vX.Y.N** pill appears in the header and a one-time **Update available** popup offers **Update now**. The update downloads and installs over the current version through the TV's own debugging service, keeping theme, app order and subscriptions. If that isn't allowed, Android's installer screen asks you to confirm. You can also use **⚙ → Check for updates**.
+
+Updates replace the app only when they're signed with the same key. Official builds use the `SIGNING_KEYSTORE` secret; a TV that has a build signed with another key (an older GitHub build or a PC build) must uninstall it once.
 
 ## Accounts & Profiles without the PC (v3.6)
 

@@ -165,6 +165,7 @@ public class HomeActivity extends Activity {
             greeting.setText(who.isEmpty() ? hello : hello + ", " + who);
             if (heroGreeting != null) heroGreeting.setText(greeting.getText());
             if (System.currentTimeMillis() - lastWeatherAt > WEATHER_EVERY_MS) loadWeather();
+            if (System.currentTimeMillis() - prefs().getLong(KEY_UPD_CHECKED, 0) > UPDATE_EVERY_MS) checkForUpdate(false);
             // Auto theme: switch when the time of day moves into the next band
             if (prefs().getInt(KEY_THEME, 0) == Ui.AUTO && Ui.resolveTheme(Ui.AUTO) != appliedTheme) applyTheme();
             handler.postDelayed(this, 15_000);
@@ -181,6 +182,7 @@ public class HomeActivity extends Activity {
         importConfig(getIntent());
         checkOpenExtra(getIntent());
         setContentView(buildUi());
+        handleInstallStatus(getIntent());
         applyLookSettings();
         applyTheme();
     }
@@ -188,6 +190,7 @@ public class HomeActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (handleInstallStatus(intent)) return;
         checkOpenExtra(intent);
         if (importConfig(intent)) {
             lastWeatherAt = 0;
@@ -218,6 +221,7 @@ public class HomeActivity extends Activity {
             handler.postDelayed(this::showQuickSettings, 350);
         }
         handler.postDelayed(this::maybeOfferDefaultHome, 1500);
+        handler.postDelayed(() -> checkForUpdate(false), 4000);
     }
 
     private boolean openQuickPending;
@@ -448,6 +452,16 @@ public class HomeActivity extends Activity {
         avatar.setOnClickListener(v -> showAccountMenu());
         avatar.setOnFocusChangeListener((v, has) -> v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
                 .setInterpolator(new OvershootInterpolator(2f)).setDuration(220).start());
+        // ---- "update available" pill (hidden until a newer release exists)
+        updateChip = ui.button("⬆  Update", true);
+        updateChip.setTextSize(12);
+        updateChip.setPadding(ui.px(14), ui.px(6), ui.px(14), ui.px(6));
+        updateChip.setVisibility(View.GONE);
+        updateChip.setOnClickListener(v -> showUpdateDialog());
+        LinearLayout.LayoutParams ulp = new LinearLayout.LayoutParams(-2, -2);
+        ulp.leftMargin = ui.px(14);
+        header.addView(updateChip, ulp);
+
         // ---- app search (left of the gear)
         TextView search = ui.text("🔍", 18, Ui.WHITE, Ui.REGULAR);
         search.setGravity(Gravity.CENTER);
@@ -701,6 +715,7 @@ public class HomeActivity extends Activity {
         if (iconFloat != null) iconFloat.cancel();
         if (heroFloat != null) heroFloat.cancel();
         if (signatureShimmer != null) signatureShimmer.cancel();
+        if (updateGlow != null) updateGlow.cancel();
         if (signatureBreath != null) signatureBreath.cancel();
         if (heroGlow != null) heroGlow.cancel();
         for (Animator a : pulses) a.cancel();
@@ -1273,6 +1288,226 @@ public class HomeActivity extends Activity {
         }).start();
     }
 
+    // =================================================================== updates from GitHub releases
+
+    private static final String UPDATE_API = "https://api.github.com/repos/chowdhuryavy/My_tv/releases/latest";
+    private static final String KEY_UPD_CHECKED = "update_checked_at", KEY_UPD_TAG = "update_tag", KEY_UPD_URL = "update_url";
+    private static final long UPDATE_EVERY_MS = 60 * 60 * 1000L; // hourly while the home screen is open
+    private static final String ACTION_INSTALL_STATUS = "com.avy.tvhome.INSTALL_STATUS";
+    private TextView updateChip;
+    private ObjectAnimator updateGlow;
+    private volatile boolean updating;
+
+    /** -1 / 0 / 1 comparing "3.7.12" style versions (missing parts count as 0). */
+    private static int compareVersions(String a, String b) {
+        String[] x = a.replaceAll("[^0-9.]", "").split("\\."), y = b.replaceAll("[^0-9.]", "").split("\\.");
+        for (int i = 0; i < Math.max(x.length, y.length); i++) {
+            int p = i < x.length && !x[i].isEmpty() ? Integer.parseInt(x[i]) : 0;
+            int q = i < y.length && !y[i].isEmpty() ? Integer.parseInt(y[i]) : 0;
+            if (p != q) return p < q ? -1 : 1;
+        }
+        return 0;
+    }
+
+    /** Asks GitHub for the newest release; shows the Update chip (and a one-time popup) when it's newer. */
+    private void checkForUpdate(final boolean manual) {
+        if (!manual && System.currentTimeMillis() - prefs().getLong(KEY_UPD_CHECKED, 0) < UPDATE_EVERY_MS) {
+            showUpdateChip(); // remembered from the last check
+            return;
+        }
+        prefs().edit().putLong(KEY_UPD_CHECKED, System.currentTimeMillis()).apply();
+        if (manual) Toast.makeText(this, "Checking for updates…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(UPDATE_API).openConnection();
+                c.setConnectTimeout(15_000);
+                c.setReadTimeout(20_000);
+                c.setRequestProperty("Accept", "application/vnd.github+json");
+                c.setRequestProperty("User-Agent", "AvyTVHome");
+                JSONObject rel;
+                try { rel = new JSONObject(new String(readAll(c.getInputStream()), StandardCharsets.UTF_8)); }
+                finally { c.disconnect(); }
+                String tag = rel.optString("tag_name", "");
+                String url = "";
+                JSONArray assets = rel.optJSONArray("assets");
+                for (int i = 0; assets != null && i < assets.length(); i++) {
+                    JSONObject a = assets.getJSONObject(i);
+                    if (a.optString("name").endsWith(".apk")) { url = a.optString("browser_download_url"); break; }
+                }
+                final boolean newer = !tag.isEmpty() && !url.isEmpty() && compareVersions(tag, appVersion()) > 0;
+                prefs().edit().putString(KEY_UPD_TAG, newer ? tag : "").putString(KEY_UPD_URL, newer ? url : "").apply();
+                runOnUiThread(() -> {
+                    showUpdateChip();
+                    if (newer && (manual || !prefs().getBoolean("update_prompted_" + tag, false))) {
+                        prefs().edit().putBoolean("update_prompted_" + tag, true).apply();
+                        showUpdateDialog();
+                    } else if (manual && !newer) {
+                        Toast.makeText(this, "You have the latest version (v" + appVersion() + ")", Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception e) {
+                android.util.Log.w("AvyUpdate", "check failed", e);
+                if (manual) runOnUiThread(() -> Toast.makeText(this, "Couldn't check for updates: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    private boolean updateAvailable() {
+        String tag = prefs().getString(KEY_UPD_TAG, "");
+        return !tag.isEmpty() && compareVersions(tag, appVersion()) > 0 && !prefs().getString(KEY_UPD_URL, "").isEmpty();
+    }
+
+    /** Glowing "Update" pill in the header while a newer version is waiting. */
+    private void showUpdateChip() {
+        if (updateChip == null) return;
+        boolean show = updateAvailable();
+        if (show) updateChip.setText("⬆  " + prefs().getString(KEY_UPD_TAG, ""));
+        updateChip.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show && (updateGlow == null || !updateGlow.isRunning())) {
+            updateGlow = ObjectAnimator.ofFloat(updateChip, View.ALPHA, 1f, 0.55f);
+            updateGlow.setDuration(900);
+            updateGlow.setRepeatCount(ValueAnimator.INFINITE);
+            updateGlow.setRepeatMode(ValueAnimator.REVERSE);
+            updateGlow.start();
+        } else if (!show && updateGlow != null) {
+            updateGlow.cancel();
+            updateChip.setAlpha(1f);
+        }
+    }
+
+    private void showUpdateDialog() {
+        if (!updateAvailable()) return;
+        final String tag = prefs().getString(KEY_UPD_TAG, "");
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Update available", 24, Ui.WHITE, Ui.MEDIUM));
+        addWithTop(panel, ui.text("Avy TV Home " + tag + " is ready.  You have v" + appVersion() + ".\n"
+                + "It replaces the current version and keeps your theme, apps and subscriptions.", 14, Ui.SOFT, Ui.REGULAR), 8);
+        final Dialog d = dialog(panel);
+        LinearLayout actions = new LinearLayout(this);
+        TextView now = ui.button("Update now", true);
+        now.setOnClickListener(v -> { d.dismiss(); downloadAndInstall(); });
+        actions.addView(now, buttonLp());
+        TextView later = ui.button("Later", false);
+        later.setOnClickListener(v -> d.dismiss());
+        actions.addView(later, buttonLp());
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, -2);
+        alp.topMargin = ui.px(18);
+        panel.addView(actions, alp);
+        d.show();
+        now.requestFocus();
+    }
+
+    /**
+     * Downloads the newest APK and installs it over this one (same package + same signing key,
+     * so it replaces the app and keeps its data). Uses the TV's own debugging service for a
+     * silent install; falls back to Android's installer screen.
+     */
+    private void downloadAndInstall() {
+        if (updating) return;
+        updating = true;
+        final String url = prefs().getString(KEY_UPD_URL, ""), tag = prefs().getString(KEY_UPD_TAG, "");
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Updating to " + tag, 22, Ui.WHITE, Ui.MEDIUM));
+        final TextView status = ui.text("Downloading…", 15, Ui.SOFT, Ui.REGULAR);
+        addWithTop(panel, status, 10);
+        final Dialog d = dialog(panel);
+        d.setCancelable(false);
+        d.show();
+        new Thread(() -> {
+            File apk = null;
+            try {
+                File dir = getExternalFilesDir(null);
+                if (dir == null) dir = getFilesDir();
+                apk = new File(dir, "update.apk");
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setConnectTimeout(15_000);
+                c.setReadTimeout(60_000);
+                c.setInstanceFollowRedirects(true);
+                c.setRequestProperty("User-Agent", "AvyTVHome");
+                try (java.io.InputStream in = c.getInputStream(); java.io.FileOutputStream out = new java.io.FileOutputStream(apk)) {
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                } finally { c.disconnect(); }
+                if (apk.length() < 10_000) throw new Exception("download was incomplete");
+                runOnUiThread(() -> status.setText("Installing… the home screen restarts in a moment."));
+                installSilently(apk);
+                // If we're still running a while later, the silent install didn't happen.
+                Thread.sleep(25_000);
+                throw new Exception("silent install didn't finish");
+            } catch (Exception e) {
+                android.util.Log.w("AvyUpdate", "silent update failed, using installer", e);
+                final File f = apk;
+                runOnUiThread(() -> {
+                    if (d.isShowing()) d.dismiss();
+                    updating = false;
+                    if (f != null && f.isFile() && f.length() >= 10_000) installWithInstaller(f);
+                    else Toast.makeText(this, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                });
+            }
+        }).start();
+    }
+
+    /** pm install -r through the TV's own debugging service; runs detached so it survives this app restarting. */
+    private void installSilently(File apk) throws Exception {
+        try (LocalAdb.Session adb = LocalAdb.open(this, 20_000)) {
+            String svc = getPackageName() + "/" + getPackageName() + ".KeyService";
+            String acc = adb.shell("settings get secure enabled_accessibility_services");
+            String reenable = acc != null && acc.contains(getPackageName())
+                    ? "; sleep 4; settings put secure accessibility_enabled 1; settings put secure enabled_accessibility_services " + svc : "";
+            String tmp = "/data/local/tmp/avy-update.apk";
+            String home = getPackageName() + "/.HomeActivity";
+            adb.shell("cp '" + apk.getAbsolutePath() + "' " + tmp + " && chmod 644 " + tmp);
+            adb.shell("nohup sh -c 'pm install -r " + tmp + " && cmd package set-home-activity " + home
+                    + " && am start -n " + home + reenable + "; rm -f " + tmp + "' >/dev/null 2>&1 &");
+        }
+    }
+
+    /** Android's own installer screen (asks to confirm; may ask once to allow installs from this app). */
+    private void installWithInstaller(File apk) {
+        try {
+            android.content.pm.PackageInstaller pi = getPackageManager().getPackageInstaller();
+            android.content.pm.PackageInstaller.SessionParams params =
+                    new android.content.pm.PackageInstaller.SessionParams(android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+            params.setAppPackageName(getPackageName());
+            int id = pi.createSession(params);
+            try (android.content.pm.PackageInstaller.Session s = pi.openSession(id)) {
+                try (java.io.OutputStream out = s.openWrite("base.apk", 0, apk.length());
+                     java.io.InputStream in = new java.io.FileInputStream(apk)) {
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    s.fsync(out);
+                }
+                Intent cb = new Intent(this, HomeActivity.class).setAction(ACTION_INSTALL_STATUS);
+                android.app.PendingIntent pend = android.app.PendingIntent.getActivity(this, id, cb,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+                s.commit(pend.getIntentSender());
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Result from Android's installer: show its confirm screen, or report a failure. */
+    private boolean handleInstallStatus(Intent i) {
+        if (i == null || !ACTION_INSTALL_STATUS.equals(i.getAction())) return false;
+        int st = i.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999);
+        if (st == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
+            if (confirm != null) safeStart(confirm);
+        } else if (st != android.content.pm.PackageInstaller.STATUS_SUCCESS) {
+            String msg = i.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
+            Toast.makeText(this, "Update not installed" + (msg == null ? "" : ": " + msg)
+                    + (st == android.content.pm.PackageInstaller.STATUS_FAILURE_CONFLICT
+                       || st == android.content.pm.PackageInstaller.STATUS_FAILURE_INCOMPATIBLE
+                       ? "  (this copy was signed with a different key: uninstall it once, then install the new version)" : ""),
+                    Toast.LENGTH_LONG).show();
+        }
+        i.setAction(null);
+        return true;
+    }
+
     // =================================================================== quick settings
 
     private void showQuickSettings() {
@@ -1295,6 +1530,7 @@ public class HomeActivity extends Activity {
             {"🌙   Screen saver", new Intent("com.google.android.tv.settings.ambient")},
             {"🎮   Remote buttons", (Runnable) this::showRemoteButtons},
             {"🎨   Customize look", (Runnable) this::showCustomize},
+            {"⬆   Check for updates", (Runnable) () -> checkForUpdate(true)},
             {"⚙   All settings", (Runnable) this::openSettingsWithAccounts},
             {"🏠   Make Avy my Home", (Runnable) this::makeDefaultHome},
         };
