@@ -35,7 +35,7 @@ jobs:
           # 1. Resources
           $BT/aapt2 compile --dir res -o out/res.zip
           $BT/aapt2 link -I $JAR --manifest AndroidManifest.xml \
-            --min-sdk-version 21 --target-sdk-version 34 \
+            --min-sdk-version 25 --target-sdk-version 25 \
             --java out/gen -o out/base.apk out/res.zip
 
           # 2. Java -> classes
@@ -44,19 +44,19 @@ jobs:
             $(find src out/gen -name "*.java")
 
           # 3. Classes -> dex
-          $BT/d8 --release --min-api 21 --lib $JAR --output out/dex \
+          $BT/d8 --release --min-api 25 --lib $JAR --output out/dex \
             $(find out/classes -name "*.class")
 
           # 4. Package, align, sign
           cp out/base.apk out/unsigned.apk
           zip -j out/unsigned.apk out/dex/classes.dex
-          $BT/zipalign -f 4 out/unsigned.apk out/aligned.apk
+          $BT/zipalign -f -p 4 out/unsigned.apk out/aligned.apk
           keytool -genkeypair -keystore out/key.jks \
             -storepass android -keypass android -alias key \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=${{ github.repository_owner }}"
           $BT/apksigner sign --ks out/key.jks --ks-pass pass:android \
-            --out ../TvHome.apk out/aligned.apk
+            --key-pass pass:android --out ../TvHome.apk out/aligned.apk
           $BT/apksigner verify ../TvHome.apk
           echo "APK built successfully"
 

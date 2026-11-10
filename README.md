@@ -94,7 +94,20 @@ One-time setup (about 10 minutes, free):
    Then run `scripts\set-config.ps1`.
 6. On the TV, select the **avatar → Sign in with Google (photo)**. On your phone, open **google.com/device**, enter the code shown on the TV, and allow access.
 
+**Without a PC:** skip step 5. On the TV, select **avatar → Sign in with Google (photo) → Enter sign-in ID** and paste the Client ID and secret with the Google TV app's keyboard on your phone. They're saved only on that TV.
+
 To stop syncing, use **avatar → Stop Google photo sync**. To remove access completely, go to myaccount.google.com → Security → Third-party connections.
+
+## Install without a PC (GitHub build)
+
+Every push to `main` builds the APK on GitHub and publishes it at
+`https://github.com/chowdhuryavy/My_tv/releases/latest/download/TvHome.apk`.
+
+1. On the TV, turn on **Developer options**, then **USB debugging** and **Network debugging**.
+2. Install the APK with the **Downloader** app (paste the link above) or from a phone with **Bugjaeger**.
+3. Open **Avy TV Home**. If another home screen is still the default, it offers **Make default**. You can also use **⚙ → Make Avy my Home**. On "Allow USB debugging?", tick **Always allow** and press **Allow**.
+
+GitHub builds are signed with a new key each time, so uninstall the old version before installing an update.
 
 ## Accounts & Profiles without the PC (v3.6)
 

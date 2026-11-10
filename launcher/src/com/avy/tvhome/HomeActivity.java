@@ -197,6 +197,7 @@ public class HomeActivity extends Activity {
             openQuickPending = false;
             handler.postDelayed(this::showQuickSettings, 350);
         }
+        handler.postDelayed(this::maybeOfferDefaultHome, 1500);
     }
 
     private boolean openQuickPending;
@@ -694,6 +695,7 @@ public class HomeActivity extends Activity {
                 applyTheme();
             }},
             {"⚙   All settings", (Runnable) this::openSettingsWithAccounts},
+            {"🏠   Make Avy my Home", (Runnable) this::makeDefaultHome},
         };
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -796,12 +798,87 @@ public class HomeActivity extends Activity {
         }
     }
 
+    // =================================================================== make Avy the default Home (no PC)
+
+    /** Google TV's setup app; its "recovery" HOME screen outranks third-party launchers. */
+    private static final String GOOGLE_SETUP = "com.google.android.tungsten.setupwraith";
+    private static final String KEY_HOME_ASKED = "home_prompt_asked";
+
+    /** True when pressing Home already opens Avy TV Home. */
+    private boolean isDefaultHome() {
+        try {
+            ResolveInfo ri = getPackageManager().resolveActivity(
+                    new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+                    PackageManager.MATCH_DEFAULT_ONLY);
+            return ri != null && ri.activityInfo != null
+                    && getPackageName().equals(ri.activityInfo.packageName);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** When another home screen is still the default, offer once to switch (also in ⚙ menu). */
+    private void maybeOfferDefaultHome() {
+        if (settingsWatch || prefs().getBoolean(KEY_GL_ON, false)) return;
+        if (prefs().getBoolean(KEY_HOME_ASKED, false) || isDefaultHome()) return;
+        prefs().edit().putBoolean(KEY_HOME_ASKED, true).apply();
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Make Avy TV Home your Home screen?", 24, Ui.WHITE, Ui.MEDIUM));
+        TextView info = ui.text("Another home screen is still the default. Avy can switch it for you "
+                + "(needs USB debugging and Network debugging on in Developer options). "
+                + "If the TV asks \"Allow USB debugging?\", tick Always allow, then Allow.",
+                16, Ui.WHITE, Ui.REGULAR);
+        info.setMaxWidth(ui.px(620));
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(-2, -2);
+        ilp.topMargin = ui.px(10);
+        panel.addView(info, ilp);
+        final Dialog d = dialog(panel);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        TextView yes = ui.button("Make default", true);
+        TextView no = ui.button("Not now", false);
+        yes.setOnClickListener(v -> { d.dismiss(); makeDefaultHome(); });
+        no.setOnClickListener(v -> d.dismiss());
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-2, -2);
+        blp.rightMargin = ui.px(12);
+        row.addView(yes, blp);
+        row.addView(no, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-2, -2);
+        rlp.topMargin = ui.px(18);
+        panel.addView(row, rlp);
+        d.show();
+        yes.requestFocus();
+    }
+
+    /** Same as install-launcher.ps1, done on the TV itself through its own debugging service. */
+    private void makeDefaultHome() {
+        Toast.makeText(this, "Making Avy your Home screen… If asked, tick Always allow, then Allow",
+                Toast.LENGTH_LONG).show();
+        new Thread(() -> {
+            try (LocalAdb.Session adb = LocalAdb.open(this, 30_000)) {
+                adb.shell("pm disable-user --user 0 " + GOOGLE_LAUNCHER);
+                adb.shell("pm disable-user --user 0 " + GOOGLE_SETUP);
+                adb.shell("cmd package set-home-activity " + getPackageName() + "/.HomeActivity");
+                prefs().edit().putBoolean(KEY_GL_ON, false).apply();
+                android.util.Log.i("AvyAdb", "Avy set as default Home");
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Done! Avy TV Home is now your Home screen", Toast.LENGTH_LONG).show());
+            } catch (Exception e) {
+                android.util.Log.w("AvyAdb", "make default failed", e);
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Couldn't switch. Turn on USB debugging + Network debugging in Developer options, then try ⚙ → Make Avy my Home",
+                        Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
     /** Google launcher off again, Avy is Home; if Google's home screen popped up, bring Avy back. */
     private void restoreHome(LocalAdb.Session adb, boolean bringAvyBack) {
         LocalAdb.Session own = null;
         try {
             if (adb == null) adb = own = LocalAdb.open(this, 15_000);
             adb.shell("pm disable-user --user 0 " + GOOGLE_LAUNCHER);
+            adb.shell("pm disable-user --user 0 " + GOOGLE_SETUP);
             adb.shell("cmd package set-home-activity " + getPackageName() + "/.HomeActivity");
             prefs().edit().putBoolean(KEY_GL_ON, false).apply();
             android.util.Log.i("AvyAdb", "Google launcher off, Avy is Home");
@@ -1177,17 +1254,25 @@ public class HomeActivity extends Activity {
         if (id.isEmpty() || secret.isEmpty()) {
             LinearLayout panel = panel();
             panel.addView(ui.text("One-time setup needed", 22, Ui.WHITE, Ui.MEDIUM));
-            TextView t = ui.text("Google needs a sign-in ID for this home screen.\nFollow \"Google photo sync\" in the My_tv README on the PC,\nthen run scripts\\set-config.ps1.", 14, Ui.SOFT, Ui.REGULAR);
+            String acct = prefs().getString(KEY_ACCOUNT, "");
+            TextView t = ui.text((acct.isEmpty() ? "" : "Your Google account (" + acct + ") is already shown on the avatar.\n")
+                    + "Your Google photo needs a sign-in ID from Google Cloud (README → Google photo sync).\n"
+                    + "Paste it here with the Google TV app's keyboard on your phone. No PC needed.", 14, Ui.SOFT, Ui.REGULAR);
             t.setLineSpacing(ui.px(3), 1f);
             addWithTop(panel, t, 8);
             final Dialog d = dialog(panel);
-            TextView ok = ui.button("OK", true);
+            LinearLayout actions = new LinearLayout(this);
+            TextView enter = ui.button("Enter sign-in ID", true);
+            enter.setOnClickListener(v -> { d.dismiss(); enterGoogleClient(); });
+            actions.addView(enter, buttonLp());
+            TextView ok = ui.button("Not now", false);
             ok.setOnClickListener(v -> d.dismiss());
+            actions.addView(ok, buttonLp());
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
             lp.topMargin = ui.px(18);
-            panel.addView(ok, lp);
+            panel.addView(actions, lp);
             d.show();
-            ok.requestFocus();
+            enter.requestFocus();
             return;
         }
         LinearLayout panel = panel();
@@ -1237,6 +1322,61 @@ public class HomeActivity extends Activity {
                 runOnUiThread(() -> status.setText("Couldn't sign in: " + msg));
             }
         }).start();
+    }
+
+    /** Client ID + secret typed (or pasted from the phone) on the TV; stored only on this TV. */
+    private void enterGoogleClient() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Google sign-in ID", 22, Ui.WHITE, Ui.MEDIUM));
+        final EditText idField = googleField("Client ID (….apps.googleusercontent.com)", gClientId());
+        final EditText secretField = googleField("Client secret", gClientSecret());
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(ui.px(620), -2);
+        flp.topMargin = ui.px(14);
+        panel.addView(idField, flp);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ui.px(620), -2);
+        slp.topMargin = ui.px(10);
+        panel.addView(secretField, slp);
+        final Dialog d = dialog(panel);
+        LinearLayout actions = new LinearLayout(this);
+        TextView save = ui.button("Save & sign in", true);
+        save.setOnClickListener(v -> {
+            String id = idField.getText().toString().trim(), secret = secretField.getText().toString().trim();
+            if (id.isEmpty() || secret.isEmpty()) {
+                Toast.makeText(this, "Enter both the Client ID and the Client secret", Toast.LENGTH_LONG).show();
+                return;
+            }
+            try {
+                JSONObject cfg = config();
+                cfg.put("google_client_id", id);
+                cfg.put("google_client_secret", secret);
+                putJson(KEY_CONFIG, cfg);
+            } catch (Exception ignored) { }
+            d.dismiss();
+            startGoogleSignIn();
+        });
+        actions.addView(save, buttonLp());
+        TextView cancel = ui.button("Cancel", false);
+        cancel.setOnClickListener(v -> d.dismiss());
+        actions.addView(cancel, buttonLp());
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, -2);
+        alp.topMargin = ui.px(18);
+        panel.addView(actions, alp);
+        d.show();
+        idField.requestFocus();
+    }
+
+    private EditText googleField(String hint, String value) {
+        EditText f = new EditText(this);
+        f.setText(value);
+        f.setHint(hint);
+        f.setSingleLine(true);
+        f.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        f.setTextColor(Ui.WHITE);
+        f.setHintTextColor(0x80FFFFFF);
+        f.setTextSize(16);
+        f.setPadding(ui.px(16), ui.px(10), ui.px(16), ui.px(10));
+        f.setBackground(ui.glassItem(14));
+        return f;
     }
 
     /** Background refresh of the Google photo (on resume, at most every few hours). */
