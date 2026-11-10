@@ -715,7 +715,7 @@ public class HomeActivity extends Activity {
             b.setPadding(ui.px(18), ui.px(14), ui.px(18), ui.px(14));
             b.setOnClickListener(v -> {
                 d.dismiss();
-                if (action instanceof Intent) safeStart((Intent) action); else ((Runnable) action).run();
+                if (action instanceof Intent) openIntent((Intent) action); else ((Runnable) action).run();
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ui.px(230), -2);
             lp.rightMargin = ui.px(10);
@@ -740,12 +740,45 @@ public class HomeActivity extends Activity {
     private static final String KEY_GL_ON = "google_launcher_on";
     private volatile boolean settingsWatch;
 
-    private void openSettingsWithAccounts() {
+    private void openSettingsWithAccounts() { openSettingsPage(new Intent(Settings.ACTION_SETTINGS)); }
+
+    /** True while Google's launcher is switched off (Avy is Home), so Settings pages need it back on. */
+    private boolean googleLauncherOff() {
+        try {
+            int st = getPackageManager().getApplicationEnabledSetting(GOOGLE_LAUNCHER);
+            return st == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                    || st == PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+        } catch (Exception e) {
+            return false; // not installed: nothing to switch
+        }
+    }
+
+    /** Settings pages (TV Settings, Google TV settings, TCL inputs) are drawn with help from Google's launcher. */
+    private boolean isSettingsIntent(Intent i) {
+        String a = i.getAction() == null ? "" : i.getAction();
+        if (a.startsWith("android.settings.") || a.contains("tv.settings")) return true;
+        String pkg = i.getPackage();
+        if (pkg == null) {
+            try {
+                ResolveInfo ri = getPackageManager().resolveActivity(i, 0);
+                if (ri != null && ri.activityInfo != null) pkg = ri.activityInfo.packageName;
+            } catch (Exception ignored) { }
+        }
+        return pkg != null && (pkg.contains("settings") || pkg.startsWith("com.tcl.suspension"));
+    }
+
+    /**
+     * Opens any Settings page. When Avy is Home (Google's launcher off), switches Google's
+     * launcher on just while the page is open, because Google TV draws many Settings pages
+     * (Wi-Fi, display, sound, accounts…) with it; otherwise they open and close at once.
+     */
+    private void openSettingsPage(final Intent target) {
+        if (!googleLauncherOff() && !settingsWatch) { safeStart(target); return; } // stock launcher on: nothing to do
         if (!prefs().getBoolean("adb_explained", false)) {
             prefs().edit().putBoolean("adb_explained", true).apply();
             Toast.makeText(this, "First time only: on \"Allow USB debugging?\" tick Always allow, then Allow", Toast.LENGTH_LONG).show();
         }
-        if (settingsWatch) { safeStart(new Intent(Settings.ACTION_SETTINGS)); return; } // already on
+        if (settingsWatch) { safeStart(target); return; } // already on
         new Thread(() -> {
             // One connection for the whole visit: the TV only asks for permission once.
             LocalAdb.Session adb = null;
@@ -758,9 +791,9 @@ public class HomeActivity extends Activity {
                 android.util.Log.w("AvyAdb", "could not enable Google launcher", e);
                 if (adb != null) adb.close();
                 adb = null;
-                runOnUiThread(() -> Toast.makeText(this, "Accounts & Profiles needs debugging access (Allow on the TV)", Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> Toast.makeText(this, "Settings needs debugging access: turn on USB + Network debugging, then Allow on the TV", Toast.LENGTH_LONG).show());
             }
-            runOnUiThread(() -> safeStart(new Intent(Settings.ACTION_SETTINGS)));
+            runOnUiThread(() -> safeStart(target));
             if (adb != null) {
                 try { watchSettingsThenRestore(adb); } finally { adb.close(); }
             }
@@ -770,7 +803,7 @@ public class HomeActivity extends Activity {
     /** Screens that count as "still in Settings" (Settings, Google's account screens, Play, permission dialogs…). */
     private static boolean isSettingsScreen(String focus) {
         if (focus.contains(GOOGLE_LAUNCHER)) return !focus.contains(".home."); // account check etc. yes, its home screen no
-        return focus.contains("com.android.tv.settings") || focus.contains("com.google.android.gms")
+        return focus.contains("tv.settings") || focus.contains("com.tcl.") || focus.contains("com.google.android.gms")
                 || focus.contains("permissioncontroller") || focus.contains("com.android.vending")
                 || focus.contains("com.android.systemui") || focus.contains("setupwraith") || focus.contains("=null");
     }
@@ -1717,7 +1750,7 @@ public class HomeActivity extends Activity {
                                 .setInterpolator(new OvershootInterpolator(3f)).start();
                         Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
                         if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
-                        if (launch != null) safeStart(launch);
+                        if (launch != null) openIntent(launch);
                     }).start();
         });
         card.setOnLongClickListener(v -> { showAppMenu(pkg, name, box); return true; });
@@ -1739,8 +1772,13 @@ public class HomeActivity extends Activity {
         TextView ic = ui.text(icon, 20, Ui.WHITE, Ui.REGULAR);
         ic.setGravity(Gravity.CENTER);
         card.addView(ic, new FrameLayout.LayoutParams(-1, -1));
-        if (intent != null) card.setOnClickListener(v -> safeStart(intent));
+        if (intent != null) card.setOnClickListener(v -> openIntent(intent));
         return box;
+    }
+
+    /** Settings pages go through openSettingsPage (Google launcher on while open); anything else starts directly. */
+    private void openIntent(Intent i) {
+        if (isSettingsIntent(i)) openSettingsPage(i); else safeStart(i);
     }
 
     private void safeStart(Intent i) {
@@ -1779,12 +1817,12 @@ public class HomeActivity extends Activity {
         View open = menuButton(list, "▶   Open", () -> {
             Intent launch = getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
             if (launch == null) launch = getPackageManager().getLaunchIntentForPackage(pkg);
-            if (launch != null) safeStart(launch);
+            if (launch != null) openIntent(launch);
         }, d);
         menuButton(list, "⇆   Move left / right", () -> startMove(box), d);
         menuButton(list, "⇤   Move to start", () -> moveToEdge(box, true), d);
         menuButton(list, "⇥   Move to end", () -> moveToEdge(box, false), d);
-        menuButton(list, "ⓘ   App info", () -> safeStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg))), d);
+        menuButton(list, "ⓘ   App info", () -> openIntent(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg))), d);
         menuButton(list, "✕   Cancel", null, d);
         d.show();
         open.requestFocus();
