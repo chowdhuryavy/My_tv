@@ -66,7 +66,7 @@ jobs:
           $BT/apksigner sign --ks out/key.jks --ks-pass pass:android \
             --key-pass pass:android --out ../TvHome.apk out/aligned.apk
           $BT/apksigner verify ../TvHome.apk
-          cp ../TvHome.apk "../TvHome-v$VERSION.apk"
+          mv ../TvHome.apk "../AvyTVHome-v$VERSION.apk"
           echo "APK v$VERSION built successfully"
 
       - uses: softprops/action-gh-release@v2
@@ -75,9 +75,7 @@ jobs:
           name: Avy TV Home v${{ env.VERSION }}
           body: |
             Avy TV Home **v${{ env.VERSION }}**, built from ${{ github.sha }}.
-            Install link (always the newest): https://github.com/${{ github.repository }}/releases/latest/download/TvHome.apk
+            Newest version is always at: https://github.com/${{ github.repository }}/releases/latest
             On the TV, the version is shown in ⚙ Quick settings.
           make_latest: true
-          files: |
-            TvHome.apk
-            TvHome-v${{ env.VERSION }}.apk
+          files: AvyTVHome-v${{ env.VERSION }}.apk

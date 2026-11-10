@@ -100,11 +100,12 @@ To stop syncing, use **avatar → Stop Google photo sync**. To remove access com
 
 ## Install without a PC (GitHub build)
 
-Every push to `main` builds the APK on GitHub and publishes it at
-`https://github.com/chowdhuryavy/My_tv/releases/latest/download/TvHome.apk`.
+Every push to `main` builds the APK on GitHub and publishes a release named after its version
+(for example **v3.7.11** with `AvyTVHome-v3.7.11.apk`). The newest one is always at
+<https://github.com/chowdhuryavy/My_tv/releases/latest>.
 
 1. On the TV, turn on **Developer options**, then **USB debugging** and **Network debugging**.
-2. Install the APK with the **Downloader** app (paste the link above) or from a phone with **Bugjaeger**.
+2. Install the APK with the **Downloader** app (open the link above and select the .apk) or from a phone with **Bugjaeger**.
 3. Open **Avy TV Home**. If another home screen is still the default, it offers **Make default**. You can also use **⚙ → Make Avy my Home**. On "Allow USB debugging?", tick **Always allow** and press **Allow**.
 
 GitHub builds are signed with a new key each time, so uninstall the old version before installing an update.
