@@ -122,6 +122,10 @@ Opening **⚙ → All settings**, the **Settings** tile, or **avatar → Account
 
 ## License and credit
 
-Avy TV Home is **designed by Avy**. All rights reserved: see [LICENSE](LICENSE). You may view the code and use official builds on your own devices, but you may not redistribute it or remove the "designed by Avy" credit.
+Avy TV Home is **designed by Avy** and is free software under the **GNU GPL v3** ([LICENSE](LICENSE)) with additional terms in [NOTICE](NOTICE). In plain words:
 
-Official builds are signed with Avy's private key, which is stored only as the `SIGNING_KEYSTORE` repository secret. Builds made from a copy of this repo use a different key, so the app shows **"unofficial build"** next to the signature.
+- **Anyone may use, change and share it**, for free.
+- **The "designed by Avy" credit must stay visible** on the home screen of every copy and modified version. You may add your own credit next to it ("modified by …"), but not remove or replace it.
+- Modified versions must **share their source code** under the same license and must not pretend to be an official build.
+
+Official builds are signed with Avy's private key, which is stored only as the `SIGNING_KEYSTORE` repository secret. Builds from a copy of this repo use a different key, so the app shows **"unofficial build"** next to the credit.
