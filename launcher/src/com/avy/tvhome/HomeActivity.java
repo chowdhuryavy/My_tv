@@ -75,11 +75,13 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Avy TV Home: ad-free glass home screen with clock, live weather, subscription
+ * Lumina TV: ad-free glass home screen (designed by Avy) with clock, live weather, subscription
  * tracker (edited on the TV) and reorderable app rows.
  */
 public class HomeActivity extends Activity {
 
+    /** Product name shown in the app (the only personal name in the UI is the "designed by Avy" credit). */
+    static final String APP_NAME = "Lumina TV";
     private static final String PREFS = "tvhome";
     private static final String KEY_CONFIG = "config_json";
     private static final String KEY_ORDER = "order_json";
@@ -913,7 +915,7 @@ public class HomeActivity extends Activity {
     private void showCustomize() {
         LinearLayout panel = panel();
         panel.addView(ui.text("Customize", 24, Ui.WHITE, Ui.MEDIUM));
-        addWithTop(panel, ui.text("Changes apply right away.   ·   Avy TV Home v" + appVersion(), 13, Ui.MUTED, Ui.REGULAR), 4);
+        addWithTop(panel, ui.text("Changes apply right away.   ·   " + APP_NAME + " v" + appVersion(), 13, Ui.MUTED, Ui.REGULAR), 4);
         final Dialog d = dialog(panel);
         final String[] blur = {"None", "Soft", "Strong"}, dim = {"Light", "Medium", "Dark"};
         Object[][] items = {
@@ -1381,7 +1383,7 @@ public class HomeActivity extends Activity {
         final String tag = prefs().getString(KEY_UPD_TAG, "");
         LinearLayout panel = panel();
         panel.addView(ui.text("Update available", 24, Ui.WHITE, Ui.MEDIUM));
-        addWithTop(panel, ui.text("Avy TV Home " + tag + " is ready.  You have v" + appVersion() + ".", 14, Ui.SOFT, Ui.REGULAR), 6);
+        addWithTop(panel, ui.text(APP_NAME + " " + tag + " is ready.  You have v" + appVersion() + ".", 14, Ui.SOFT, Ui.REGULAR), 6);
         List<String> notes = whatsNew(prefs().getString(KEY_UPD_NOTES, ""));
         if (!notes.isEmpty()) {
             addWithTop(panel, ui.text("What's new", 15, Ui.accent, Ui.MEDIUM), 14);
@@ -1541,7 +1543,7 @@ public class HomeActivity extends Activity {
         qsHead.setOrientation(LinearLayout.HORIZONTAL);
         qsHead.setGravity(Gravity.BOTTOM);
         qsHead.addView(ui.text("Quick settings", 24, Ui.WHITE, Ui.MEDIUM), new LinearLayout.LayoutParams(0, -2, 1));
-        TextView ver = ui.text("Avy TV Home  v" + appVersion(), 13, Ui.accent, Ui.MEDIUM);
+        TextView ver = ui.text(APP_NAME + "  v" + appVersion(), 13, Ui.accent, Ui.MEDIUM);
         ver.setPadding(ui.px(24), 0, 0, ui.px(2));
         qsHead.addView(ver);
         panel.addView(qsHead, new LinearLayout.LayoutParams(-1, -2));
@@ -1557,7 +1559,7 @@ public class HomeActivity extends Activity {
             {"🎨   Customize look", (Runnable) this::showCustomize},
             {"⬆   Check for updates", (Runnable) () -> checkForUpdate(true)},
             {"⚙   All settings", (Runnable) this::openSettingsWithAccounts},
-            {"🏠   Make Avy my Home", (Runnable) this::makeDefaultHome},
+            {"🏠   Make this my Home screen", (Runnable) this::makeDefaultHome},
         };
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -1718,8 +1720,8 @@ public class HomeActivity extends Activity {
         if (prefs().getBoolean(KEY_HOME_ASKED, false) || isDefaultHome()) return;
         prefs().edit().putBoolean(KEY_HOME_ASKED, true).apply();
         LinearLayout panel = panel();
-        panel.addView(ui.text("Make Avy TV Home your Home screen?", 24, Ui.WHITE, Ui.MEDIUM));
-        TextView info = ui.text("Another home screen is still the default. Avy can switch it for you "
+        panel.addView(ui.text("Make " + APP_NAME + " your Home screen?", 24, Ui.WHITE, Ui.MEDIUM));
+        TextView info = ui.text("Another home screen is still the default. " + APP_NAME + " can switch it for you "
                 + "(needs USB debugging and Network debugging on in Developer options). "
                 + "If the TV asks \"Allow USB debugging?\", tick Always allow, then Allow.",
                 16, Ui.WHITE, Ui.REGULAR);
@@ -1747,7 +1749,7 @@ public class HomeActivity extends Activity {
 
     /** Same as install-launcher.ps1, done on the TV itself through its own debugging service. */
     private void makeDefaultHome() {
-        Toast.makeText(this, "Making Avy your Home screen… If asked, tick Always allow, then Allow",
+        Toast.makeText(this, "Making " + APP_NAME + " your Home screen… If asked, tick Always allow, then Allow",
                 Toast.LENGTH_LONG).show();
         new Thread(() -> {
             try (LocalAdb.Session adb = LocalAdb.open(this, 30_000)) {
@@ -1757,11 +1759,11 @@ public class HomeActivity extends Activity {
                 prefs().edit().putBoolean(KEY_GL_ON, false).apply();
                 android.util.Log.i("AvyAdb", "Avy set as default Home");
                 runOnUiThread(() -> Toast.makeText(this,
-                        "Done! Avy TV Home is now your Home screen", Toast.LENGTH_LONG).show());
+                        "Done! " + APP_NAME + " is now your Home screen", Toast.LENGTH_LONG).show());
             } catch (Exception e) {
                 android.util.Log.w("AvyAdb", "make default failed", e);
                 runOnUiThread(() -> Toast.makeText(this,
-                        "Couldn't switch. Turn on USB debugging + Network debugging in Developer options, then try ⚙ → Make Avy my Home",
+                        "Couldn't switch. Turn on USB debugging + Network debugging in Developer options, then try ⚙ → Make this my Home screen",
                         Toast.LENGTH_LONG).show());
             }
         }).start();
@@ -2397,7 +2399,7 @@ public class HomeActivity extends Activity {
         panel.addView(ui.text("Your name", 22, Ui.WHITE, Ui.MEDIUM));
         final EditText field = new EditText(this);
         field.setText(displayName());
-        field.setHint("e.g. Avy");
+        field.setHint("Your name");
         field.setSingleLine(true);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         field.setTextColor(Ui.WHITE);

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="key_service_label">Avy TV Home remote buttons</string>
+    <string name="key_service_label">Lumina TV remote buttons</string>
     <string name="key_service_desc">Makes the remote\'s app buttons (Netflix, YouTube, Prime Video…) open their apps. Only reads button presses, never screen content.</string>
 </resources>

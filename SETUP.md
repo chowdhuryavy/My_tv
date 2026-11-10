@@ -1,6 +1,6 @@
-# Set up Avy TV Home on your own TV
+# Set up Lumina TV on your own TV
 
-This guide replaces the ad-filled Google TV home screen with **Avy TV Home**. The new home screen is ad-free and fast, with a glass theme, weather, a subscription tracker, app search and round app icons. Everything can be undone (see the last section).
+This guide replaces the ad-filled Google TV home screen with **Lumina TV**. The new home screen is ad-free and fast, with a glass theme, weather, a subscription tracker, app search and round app icons. Everything can be undone (see the last section).
 
 **Works on:** Google TV and Android TV sets running Android 9 or newer. It was built and tested on a **TCL Google TV with Android 12**. Other brands work too, but their remote's app buttons may send different codes (see step 7).
 
@@ -64,7 +64,7 @@ scripts\snapshot.ps1
 
 This saves the TV's current setup into `tv-snapshot\`, so you have a record of how it was before.
 
-## 6. Build and install Avy TV Home
+## 6. Build and install Lumina TV
 
 ```powershell
 launcher\build.ps1
@@ -76,7 +76,7 @@ The install script:
 - makes it the home screen
 - **disables**, but does not delete, the Google TV home screen (`launcherx`) and Google's setup app (`setupwraith`), whose "recovery" screen would otherwise take over the Home button
 
-Press **Home** on the remote. You should see Avy TV Home.
+Press **Home** on the remote. You should see Lumina TV.
 
 > The first build creates `launcher\signing.keystore`. **Keep a backup of it.** Future updates must be signed with the same key, or you'll have to uninstall first and lose the subscriptions saved on the TV.
 
@@ -103,4 +103,4 @@ Everything below is done with the remote:
 scripts\restore-stock-launcher.ps1 -UninstallCustom
 ```
 
-This turns the Google TV home screen and setup app back on and removes Avy TV Home. Then, in **Developer options**, you can turn debugging off again.
+This turns the Google TV home screen and setup app back on and removes Lumina TV. Then, in **Developer options**, you can turn debugging off again.

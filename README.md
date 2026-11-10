@@ -1,10 +1,10 @@
-# My TV
+# Lumina TV
 
-Setup for **Avy's TV**, a TCL Google TV (G10, Android 12, 1.8 GB RAM).
+Setup for **Lumina TV** (designed by Avy) on a TCL Google TV (G10, Android 12, 1.8 GB RAM).
 
 > **Want this on your own TV?** Follow the step-by-step guide in **[SETUP.md](SETUP.md)**.
 
-The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB including its services). This repo replaces it with **Avy TV Home**, a small ad-free launcher of about 36 KB with a glass look. **Once it's installed, everything works on the TV with the remote. The PC is only needed to install or update it.**
+The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB including its services). This repo replaces it with **Lumina TV**, a small ad-free launcher of about 36 KB with a glass look. **Once it's installed, everything works on the TV with the remote. The PC is only needed to install or update it.**
 
 ## Features
 
@@ -23,7 +23,7 @@ The stock Google TV home screen shows ads and uses a lot of memory (about 110 MB
 - **Animations:** a drifting background with floating light particles, a floating weather icon, staggered slide-in on open, a bouncy focus zoom, the current row's title lighting up, a press-squeeze when you open an app, the clock sliding to each new minute, subscription chips popping in, pop-in dialogs and a theme cross-fade. **Moving an app:** it lifts up and the others dim, the gold ring pulses, it hops into each new spot while the others slide aside, and when you drop it there is a bounce and a gold ripple. Everything pauses while another app is open.
 - **⚙ Quick settings** (top right): Wi-Fi, Bluetooth, Picture & display, Sound, Inputs (HDMI), Screen saver, Remote buttons, Change theme and All settings.
 - **Profile avatar** (top right): select it, choose **Show my Google account**, and press **Allow**. The avatar then shows your account initial and the menu shows your Google email. You can also set a display name. The app targets SDK 25 on purpose: newer targets can't see Google accounts on Google TV without the stock launcher's picker.
-- **Remote app buttons** (Netflix, YouTube, Prime Video, Web, Settings): handled by Avy TV Home itself **while the home screen is showing**. Inside another app, press **Home** first. This keeps held buttons (volume, arrows) repeating normally. Change what a button opens in **⚙ → Remote buttons → Set up a button**.
+- **Remote app buttons** (Netflix, YouTube, Prime Video, Web, Settings): handled by Lumina TV itself **while the home screen is showing**. Inside another app, press **Home** first. This keeps held buttons (volume, arrows) repeating normally. Change what a button opens in **⚙ → Remote buttons → Set up a button**.
   - Optional: `scriptsnable-buttons.ps1` turns on the accessibility helper so buttons work inside other apps too. On this TV that stops held buttons from repeating, and it has to be switched on again after every update.
 
 ### Remote tips
@@ -43,7 +43,7 @@ Android keeps each app's account data private to that app, and Netflix, Prime Vi
 | Path | What it is |
 |---|---|
 | `tv-snapshot/` | The TV's setup before the change: device info, launchers, installed apps |
-| `launcher/` | Avy TV Home source (plain Java, no Gradle) and `build.ps1` |
+| `launcher/` | Lumina TV source (plain Java, no Gradle) and `build.ps1` |
 | `scripts/` | Snapshot, install, restore and optional config scripts |
 | `config/config.json` | Optional city override. **Git-ignored.** |
 
@@ -57,7 +57,7 @@ launcher\build.ps1                   # build launcher\out\avy-tv-home.apk
 scripts\install-launcher.ps1         # install/update it and make it the home screen
 scripts\set-config.ps1               # optional: force a weather city from config\config.json
 scripts\set-avatar.ps1 photo.jpg     # optional: your picture in the top-right avatar
-scripts\google-accounts.ps1          # Google launcher on briefly for Settings > Accounts & Profiles; Enter = back to Avy
+scripts\google-accounts.ps1          # Google launcher on briefly for Settings > Accounts & Profiles; Enter = back to Lumina TV
 scripts\enable-buttons.ps1           # optional: remote-button helper so buttons work inside other apps too
 scripts\restore-stock-launcher.ps1   # go back to the original Google TV home
 ```
@@ -79,17 +79,17 @@ scripts\restore-stock-launcher.ps1   # go back to the original Google TV home
 
 ## Google photo sync (automatic profile picture)
 
-Android doesn't give your Google profile photo to other apps; only Google's own launcher could show it. Avy TV Home instead signs in with Google's official **TV sign-in** (you approve on your phone). It asks only for your **name, email and photo**, and refreshes the photo automatically every few hours.
+Android doesn't give your Google profile photo to other apps; only Google's own launcher could show it. Lumina TV instead signs in with Google's official **TV sign-in** (you approve on your phone). It asks only for your **name, email and photo**, and refreshes the photo automatically every few hours.
 
 One-time setup (about 10 minutes, free):
 
-1. Open <https://console.cloud.google.com> and **create a project**, for example "Avy TV Home".
+1. Open <https://console.cloud.google.com> and **create a project**, for example "Lumina TV".
 2. Go to **Google Auth Platform → Get started**. Enter an app name and your email, choose **Audience: External**, and finish.
 3. Under **Audience**, select **Publish app**. Without this, Google signs you out after 7 days. Name, email and photo don't need Google's review.
 4. Go to **Clients → Create client** and choose **TVs and Limited Input devices**. Copy the **Client ID** and **Client secret**.
 5. On the PC, put them in `config/config.json` (git-ignored, never pushed):
    ```json
-   { "city": "", "name": "Avy", "google_client_id": "…apps.googleusercontent.com", "google_client_secret": "…" }
+   { "city": "", "name": "", "google_client_id": "…apps.googleusercontent.com", "google_client_secret": "…" }
    ```
    Then run `scripts\set-config.ps1`.
 6. On the TV, select the **avatar → Sign in with Google (photo)**. On your phone, open **google.com/device**, enter the code shown on the TV, and allow access.
@@ -101,31 +101,31 @@ To stop syncing, use **avatar → Stop Google photo sync**. To remove access com
 ## Install without a PC (GitHub build)
 
 Every push to `main` builds the APK on GitHub and publishes a release named after its version
-(for example **v3.7.11** with `AvyTVHome-v3.7.11.apk`). The newest one is always at
+(for example **v3.8.20** with `LuminaTV-v3.8.20.apk`). The newest one is always at
 <https://github.com/chowdhuryavy/My_tv/releases/latest>.
 
 1. On the TV, turn on **Developer options**, then **USB debugging** and **Network debugging**.
 2. Install the APK with the **Downloader** app (open the link above and select the .apk) or from a phone with **Bugjaeger**.
-3. Open **Avy TV Home**. If another home screen is still the default, it offers **Make default**. You can also use **⚙ → Make Avy my Home**. On "Allow USB debugging?", tick **Always allow** and press **Allow**.
+3. Open **Lumina TV**. If another home screen is still the default, it offers **Make default**. You can also use **⚙ → Make this my Home screen**. On "Allow USB debugging?", tick **Always allow** and press **Allow**.
 
-**Updates on the TV:** Avy checks GitHub for a newer release every hour (and each time you return Home). When one exists, a glowing **⬆ vX.Y.N** pill appears in the header and a one-time **Update available** popup offers **Update now**. The update downloads and installs over the current version through the TV's own debugging service, keeping theme, app order and subscriptions. If that isn't allowed, Android's installer screen asks you to confirm. You can also use **⚙ → Check for updates**.
+**Updates on the TV:** Lumina TV checks GitHub for a newer release every hour (and each time you return Home). When one exists, a glowing **⬆ vX.Y.N** pill appears in the header and a one-time **Update available** popup offers **Update now**. The update downloads and installs over the current version through the TV's own debugging service, keeping theme, app order and subscriptions. If that isn't allowed, Android's installer screen asks you to confirm. You can also use **⚙ → Check for updates**.
 
 Updates replace the app only when they're signed with the same key. Official builds use the `SIGNING_KEYSTORE` secret; a TV that has a build signed with another key (an older GitHub build or a PC build) must uninstall it once.
 
 ## Accounts & Profiles without the PC (v3.6)
 
-Opening **⚙ → All settings**, the **Settings** tile, or **avatar → Accounts & Profiles** in Avy TV Home now switches Google's launcher on automatically, so Accounts & Profiles works. When you leave Settings, it switches the launcher off again and makes Avy your Home screen. To do this, Avy connects to the TV's own debugging service (`LocalAdb`).
+Opening **⚙ → All settings**, the **Settings** tile, or **avatar → Accounts & Profiles** in Lumina TV now switches Google's launcher on automatically, so Accounts & Profiles works. When you leave Settings, it switches the launcher off again and makes Lumina TV your Home screen. To do this, Lumina TV connects to the TV's own debugging service (`LocalAdb`).
 
-- **First time:** the TV asks **"Allow USB debugging?"** for Avy TV Home. Tick **Always allow** and press **Allow**.
-- **Trade-off:** once allowed, Avy TV Home holds full debugging access to the TV, the same as a connected PC. It only uses it to switch the launcher. To withdraw it, go to **Developer options → Revoke USB debugging authorisations**.
-- The TV's own **Settings button** on the remote opens Settings directly, so use ⚙ in Avy when you need Accounts & Profiles.
+- **First time:** the TV asks **"Allow USB debugging?"** for Lumina TV. Tick **Always allow** and press **Allow**.
+- **Trade-off:** once allowed, Lumina TV holds full debugging access to the TV, the same as a connected PC. It only uses it to switch the launcher. To withdraw it, go to **Developer options → Revoke USB debugging authorisations**.
+- The TV's own **Settings button** on the remote opens Settings directly, so use ⚙ in Lumina TV when you need Accounts & Profiles.
 
 ## License and credit
 
-Avy TV Home is **designed by Avy** and is free software under the **GNU GPL v3** ([LICENSE](LICENSE)) with additional terms in [NOTICE](NOTICE). In plain words:
+Lumina TV is **designed by Avy** and is free software under the **GNU GPL v3** ([LICENSE](LICENSE)) with additional terms in [NOTICE](NOTICE). In plain words:
 
 - **Anyone may use, change and share it**, for free.
 - **The "designed by Avy" credit must stay visible** on the home screen of every copy and modified version. You may add your own credit next to it ("modified by …"), but not remove or replace it.
 - Modified versions must **share their source code** under the same license and must not pretend to be an official build.
 
-Official builds are signed with Avy's private key, which is stored only as the `SIGNING_KEYSTORE` repository secret. Builds from a copy of this repo use a different key, so the app shows **"unofficial build"** next to the credit.
+Official builds are signed with the official private key, which is stored only as the `SIGNING_KEYSTORE` repository secret. Builds from a copy of this repo use a different key, so the app shows **"unofficial build"** next to the credit.
