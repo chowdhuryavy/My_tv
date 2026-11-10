@@ -117,6 +117,8 @@ public class HomeActivity extends Activity {
     private static final String KEY_WALL = "wallpaper_on", KEY_WALL_BLUR = "wallpaper_blur", KEY_WALL_DIM = "wallpaper_dim";
     private static final String KEY_HEADER = "header_style", KEY_24H = "clock_24h";
     private static final String KEY_PARTICLES = "particles_on", KEY_SUBS_STRIP = "subs_strip_on";
+    /** Calm motion: no drifting backdrop or floating lights (smoother on slower TVs). */
+    private static final String KEY_CALM = "calm_motion";
     // account avatar (top right)
     private static final int REQ_ACCOUNT = 42;
     private static final String KEY_ACCOUNT = "account";
@@ -345,6 +347,7 @@ public class HomeActivity extends Activity {
         rootLayout = root;
         backdrop = new ImageView(this);
         backdrop.setScaleType(ImageView.ScaleType.FIT_XY);
+        backdrop.setLayerType(View.LAYER_TYPE_HARDWARE, null); // drift = cheap GPU transform, no full redraw
         root.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
 
         // floating light particles over the backdrop (animated in startAmbient)
@@ -359,6 +362,7 @@ public class HomeActivity extends Activity {
             int sz = ui.px(4 + rnd.nextInt(8));
             g.setGradientRadius(sz / 2f);
             dot.setBackground(g);
+            dot.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             FrameLayout.LayoutParams dlp2 = new FrameLayout.LayoutParams(sz, sz);
             dlp2.leftMargin = rnd.nextInt(Math.max(1, w));
             particles.addView(dot, dlp2);
@@ -612,6 +616,9 @@ public class HomeActivity extends Activity {
     /** Slow drifting backdrop + floating weather icon. Stopped while another app is open. */
     private void startAmbient() {
         stopAmbient();
+        boolean calm = prefs().getBoolean(KEY_CALM, false);
+        backdrop.setScaleX(1.12f);
+        backdrop.setScaleY(1.12f);
         ObjectAnimator sx = ObjectAnimator.ofFloat(backdrop, View.SCALE_X, 1.12f, 1.22f);
         ObjectAnimator sy = ObjectAnimator.ofFloat(backdrop, View.SCALE_Y, 1.12f, 1.22f);
         ObjectAnimator tx = ObjectAnimator.ofFloat(backdrop, View.TRANSLATION_X, -ui.px(40), ui.px(40));
@@ -627,7 +634,7 @@ public class HomeActivity extends Activity {
         drift = new AnimatorSet();
         drift.playTogether(sx, sy, tx, ty);
         drift.setInterpolator(new AccelerateDecelerateInterpolator());
-        drift.start();
+        if (!calm) drift.start();
 
         iconFloat = ObjectAnimator.ofFloat(weatherIcon, View.TRANSLATION_Y, -ui.px(4), ui.px(4));
         iconFloat.setDuration(2600);
@@ -656,7 +663,7 @@ public class HomeActivity extends Activity {
         // light particles rise slowly from the bottom, twinkling, each on its own rhythm
         int h = getResources().getDisplayMetrics().heightPixels;
         java.util.Random rnd = new java.util.Random();
-        boolean particlesOn = prefs().getBoolean(KEY_PARTICLES, true);
+        boolean particlesOn = prefs().getBoolean(KEY_PARTICLES, true) && !calm;
         for (int i = 0; particlesOn && particles != null && i < particles.getChildCount(); i++) {
             View dot = particles.getChildAt(i);
             long dur = 16_000 + rnd.nextInt(14_000);
@@ -857,7 +864,7 @@ public class HomeActivity extends Activity {
         if (heroView != null) heroView.setVisibility(big ? View.VISIBLE : View.GONE);
         if (headerView != null) headerView.setVisibility(big ? View.INVISIBLE : View.VISIBLE);
         if (weatherCard != null) weatherCard.setVisibility(big ? View.GONE : View.VISIBLE);
-        if (particles != null) particles.setVisibility(prefs().getBoolean(KEY_PARTICLES, true) ? View.VISIBLE : View.GONE);
+        if (particles != null) particles.setVisibility(prefs().getBoolean(KEY_PARTICLES, true) && !prefs().getBoolean(KEY_CALM, false) ? View.VISIBLE : View.GONE);
         if (subsCard != null) subsCard.setVisibility(prefs().getBoolean(KEY_SUBS_STRIP, true) ? View.VISIBLE : View.GONE);
         updateHeroWeather();
     }
@@ -910,6 +917,10 @@ public class HomeActivity extends Activity {
             {new Cycle() {
                 public String label() { return "✨   Floating lights:  " + (prefs().getBoolean(KEY_PARTICLES, true) ? "On" : "Off"); }
                 public void next() { prefs().edit().putBoolean(KEY_PARTICLES, !prefs().getBoolean(KEY_PARTICLES, true)).apply(); applyLookSettings(); startAmbient(); }
+            }},
+            {new Cycle() {
+                public String label() { return "🎞   Motion:  " + (prefs().getBoolean(KEY_CALM, false) ? "Calm (smoothest)" : "Full"); }
+                public void next() { prefs().edit().putBoolean(KEY_CALM, !prefs().getBoolean(KEY_CALM, false)).apply(); applyLookSettings(); startAmbient(); }
             }},
             {new Cycle() {
                 public String label() { return "💳   Subscriptions bar:  " + (prefs().getBoolean(KEY_SUBS_STRIP, true) ? "On" : "Off"); }
@@ -2306,15 +2317,16 @@ public class HomeActivity extends Activity {
         card.setOnFocusChangeListener(chain(card.getOnFocusChangeListener(), (v, has) -> { if (has) focusPkg = pkg; }));
         card.setOnClickListener(v -> {
             if (arranging) { startMove(box); return; }
-            // press: quick squeeze and bounce, then open the app
+            // Open first, animate alongside: an animation that gets interrupted (focus change,
+            // a second press, rows refreshing) must never swallow the OK press.
+            Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
+            if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
+            if (launch != null) openIntent(launch);
+            else Toast.makeText(this, name + " can't be opened from here", Toast.LENGTH_SHORT).show();
+            // press: quick squeeze and bounce
             v.animate().scaleX(0.86f).scaleY(0.86f).setDuration(90).setInterpolator(new DecelerateInterpolator())
-                    .withEndAction(() -> {
-                        v.animate().scaleX(1.16f).scaleY(1.16f).setDuration(220)
-                                .setInterpolator(new OvershootInterpolator(3f)).start();
-                        Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
-                        if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
-                        if (launch != null) openIntent(launch);
-                    }).start();
+                    .withEndAction(() -> v.animate().scaleX(1.16f).scaleY(1.16f).setDuration(220)
+                            .setInterpolator(new OvershootInterpolator(3f)).start()).start();
         });
         card.setOnLongClickListener(v -> { showAppMenu(pkg, name, box); return true; });
         card.setOnKeyListener((v, code, ev) -> {
