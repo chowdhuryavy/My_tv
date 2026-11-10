@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # full history + tags, for the "What's new" notes
 
       - uses: actions/setup-java@v5
         with:
@@ -81,13 +83,23 @@ jobs:
           mv ../TvHome.apk "../AvyTVHome-v$VERSION.apk"
           echo "APK v$VERSION built successfully"
 
+      - name: Release notes (What's new = commit titles since the previous release)
+        run: |
+          PREV=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          {
+            echo "## What's new"
+            if [ -n "$PREV" ]; then git log "$PREV..HEAD" --no-merges --pretty='- %s' | head -8
+            else git log -1 --pretty='- %s'; fi
+            echo
+            echo "Avy TV Home **v$VERSION**, built from ${{ github.sha }}."
+            echo "Newest version is always at: https://github.com/${{ github.repository }}/releases/latest"
+          } > notes.md
+          cat notes.md
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           name: Avy TV Home v${{ env.VERSION }}
-          body: |
-            Avy TV Home **v${{ env.VERSION }}**, built from ${{ github.sha }}.
-            Newest version is always at: https://github.com/${{ github.repository }}/releases/latest
-            On the TV, the version is shown in ⚙ Quick settings.
+          body_path: notes.md
           make_latest: true
           files: AvyTVHome-v${{ env.VERSION }}.apk

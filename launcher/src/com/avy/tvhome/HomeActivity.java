@@ -1291,7 +1291,7 @@ public class HomeActivity extends Activity {
     // =================================================================== updates from GitHub releases
 
     private static final String UPDATE_API = "https://api.github.com/repos/chowdhuryavy/My_tv/releases/latest";
-    private static final String KEY_UPD_CHECKED = "update_checked_at", KEY_UPD_TAG = "update_tag", KEY_UPD_URL = "update_url";
+    private static final String KEY_UPD_CHECKED = "update_checked_at", KEY_UPD_TAG = "update_tag", KEY_UPD_URL = "update_url", KEY_UPD_NOTES = "update_notes";
     private static final long UPDATE_EVERY_MS = 60 * 60 * 1000L; // hourly while the home screen is open
     private static final String ACTION_INSTALL_STATUS = "com.avy.tvhome.INSTALL_STATUS";
     private TextView updateChip;
@@ -1335,7 +1335,8 @@ public class HomeActivity extends Activity {
                     if (a.optString("name").endsWith(".apk")) { url = a.optString("browser_download_url"); break; }
                 }
                 final boolean newer = !tag.isEmpty() && !url.isEmpty() && compareVersions(tag, appVersion()) > 0;
-                prefs().edit().putString(KEY_UPD_TAG, newer ? tag : "").putString(KEY_UPD_URL, newer ? url : "").apply();
+                prefs().edit().putString(KEY_UPD_TAG, newer ? tag : "").putString(KEY_UPD_URL, newer ? url : "")
+                        .putString(KEY_UPD_NOTES, newer ? rel.optString("body", "") : "").apply();
                 runOnUiThread(() -> {
                     showUpdateChip();
                     if (newer && (manual || !prefs().getBoolean("update_prompted_" + tag, false))) {
@@ -1380,8 +1381,17 @@ public class HomeActivity extends Activity {
         final String tag = prefs().getString(KEY_UPD_TAG, "");
         LinearLayout panel = panel();
         panel.addView(ui.text("Update available", 24, Ui.WHITE, Ui.MEDIUM));
-        addWithTop(panel, ui.text("Avy TV Home " + tag + " is ready.  You have v" + appVersion() + ".\n"
-                + "It replaces the current version and keeps your theme, apps and subscriptions.", 14, Ui.SOFT, Ui.REGULAR), 8);
+        addWithTop(panel, ui.text("Avy TV Home " + tag + " is ready.  You have v" + appVersion() + ".", 14, Ui.SOFT, Ui.REGULAR), 6);
+        List<String> notes = whatsNew(prefs().getString(KEY_UPD_NOTES, ""));
+        if (!notes.isEmpty()) {
+            addWithTop(panel, ui.text("What's new", 15, Ui.accent, Ui.MEDIUM), 14);
+            for (String n : notes) {
+                TextView line = ui.text("•  " + n, 14, Ui.WHITE, Ui.REGULAR);
+                line.setMaxWidth(ui.px(620));
+                addWithTop(panel, line, 6);
+            }
+        }
+        addWithTop(panel, ui.text("Replaces the current version and keeps your theme, apps and subscriptions.", 12, Ui.MUTED, Ui.REGULAR), 14);
         final Dialog d = dialog(panel);
         LinearLayout actions = new LinearLayout(this);
         TextView now = ui.button("Update now", true);
@@ -1395,6 +1405,21 @@ public class HomeActivity extends Activity {
         panel.addView(actions, alp);
         d.show();
         now.requestFocus();
+    }
+
+    /** Bullet lines ("- …") from the release notes' "What's new" section, cleaned of markdown. */
+    private static List<String> whatsNew(String body) {
+        List<String> out = new ArrayList<>();
+        for (String raw : body.split("\r?\n")) {
+            String l = raw.trim();
+            if (!l.startsWith("- ") && !l.startsWith("* ")) continue;
+            l = l.substring(2).replace("**", "").replace("`", "").trim();
+            if (l.isEmpty()) continue;
+            if (l.length() > 110) l = l.substring(0, 107) + "…";
+            out.add(l);
+            if (out.size() == 6) break;
+        }
+        return out;
     }
 
     /**
