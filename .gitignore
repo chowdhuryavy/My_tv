@@ -4,3 +4,7 @@ config/config.json
 # Build output and local signing key
 launcher/out/
 launcher/*.keystore
+
+# signing keys (official key lives only in the SIGNING_KEYSTORE repo secret)
+*.jks
+*.p12

@@ -565,6 +565,12 @@ public class HomeActivity extends Activity {
         sig.setSpan(new android.text.style.TypefaceSpan("cursive"), start, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         sig.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         sig.setSpan(new android.text.style.RelativeSizeSpan(1.55f), start, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (!isOfficialBuild()) {
+            int u = sig.length();
+            sig.append("   ·  unofficial build");
+            sig.setSpan(new android.text.style.RelativeSizeSpan(0.75f), u, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sig.setSpan(new android.text.style.TypefaceSpan("sans-serif"), u, sig.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
         signature = ui.text("", 13, Ui.WHITE, Ui.REGULAR);
         signature.setText(sig);
         signature.setLetterSpacing(0.06f);
@@ -1003,6 +1009,29 @@ public class HomeActivity extends Activity {
         signatureBreath.setRepeatMode(ValueAnimator.REVERSE);
         signatureBreath.setInterpolator(new AccelerateDecelerateInterpolator());
         signatureBreath.start();
+    }
+
+    /**
+     * SHA-256 of the official Avy signing certificate (public, not a secret). Builds from
+     * copies of the repo are signed with another key and show "unofficial build".
+     */
+    private static final String OFFICIAL_CERT_SHA256 =
+            "2DFBA87097DEFA6F46EA5673CEB70079B1CF2374F43110AD96B1C217FFA7AF6E";
+
+    @SuppressWarnings("deprecation")
+    private boolean isOfficialBuild() {
+        try {
+            android.content.pm.Signature[] sigs = getPackageManager()
+                    .getPackageInfo(getPackageName(), PackageManager.GET_SIGNATURES).signatures;
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            for (android.content.pm.Signature sg : sigs) {
+                byte[] h = md.digest(sg.toByteArray());
+                StringBuilder hex = new StringBuilder();
+                for (byte b : h) hex.append(String.format(Locale.ROOT, "%02X", b));
+                if (OFFICIAL_CERT_SHA256.contentEquals(hex)) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
     }
 
     /** e.g. "3.7.12" (set by the GitHub build from the build number). */

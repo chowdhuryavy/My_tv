@@ -117,3 +117,9 @@ Opening **⚙ → All settings**, the **Settings** tile, or **avatar → Account
 - **First time:** the TV asks **"Allow USB debugging?"** for Avy TV Home. Tick **Always allow** and press **Allow**.
 - **Trade-off:** once allowed, Avy TV Home holds full debugging access to the TV, the same as a connected PC. It only uses it to switch the launcher. To withdraw it, go to **Developer options → Revoke USB debugging authorisations**.
 - The TV's own **Settings button** on the remote opens Settings directly, so use ⚙ in Avy when you need Accounts & Profiles.
+
+## License and credit
+
+Avy TV Home is **designed by Avy**. All rights reserved: see [LICENSE](LICENSE). You may view the code and use official builds on your own devices, but you may not redistribute it or remove the "designed by Avy" credit.
+
+Official builds are signed with Avy's private key, which is stored only as the `SIGNING_KEYSTORE` repository secret. Builds made from a copy of this repo use a different key, so the app shows **"unofficial build"** next to the signature.

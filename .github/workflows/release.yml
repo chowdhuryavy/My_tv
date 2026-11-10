@@ -18,6 +18,10 @@ jobs:
 
       - name: Build APK
         working-directory: launcher
+        env:
+          # Official signing key (repo secret). Copies of the repo don't have it, so their
+          # builds are signed with a throwaway key and the app shows "unofficial build".
+          SIGNING_KEYSTORE: ${{ secrets.SIGNING_KEYSTORE }}
         run: |
           set -e
           # Newest stable build-tools and platform (skip beta / rc / ext)
@@ -59,12 +63,20 @@ jobs:
           cp out/base.apk out/unsigned.apk
           zip -j out/unsigned.apk out/dex/classes.dex
           $BT/zipalign -f -p 4 out/unsigned.apk out/aligned.apk
-          keytool -genkeypair -keystore out/key.jks \
-            -storepass android -keypass android -alias key \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=${{ github.repository_owner }}"
-          $BT/apksigner sign --ks out/key.jks --ks-pass pass:android \
+          if [ -n "$SIGNING_KEYSTORE" ]; then
+            echo "$SIGNING_KEYSTORE" | base64 -d > out/key.jks
+            ALIAS=avy
+            echo "Signing: official Avy key"
+          else
+            keytool -genkeypair -storetype PKCS12 -keystore out/key.jks \
+              -storepass android -keypass android -alias key \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Unofficial build"
+            ALIAS=key
+            echo "Signing: temporary key (unofficial build)"
+          fi
+          $BT/apksigner sign --ks out/key.jks --ks-key-alias $ALIAS --ks-pass pass:android \
             --key-pass pass:android --out ../TvHome.apk out/aligned.apk
+          rm -f out/key.jks
           $BT/apksigner verify ../TvHome.apk
           mv ../TvHome.apk "../AvyTVHome-v$VERSION.apk"
           echo "APK v$VERSION built successfully"
