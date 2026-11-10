@@ -66,7 +66,18 @@ jobs:
           zip -j out/unsigned.apk out/dex/classes.dex
           $BT/zipalign -f -p 4 out/unsigned.apk out/aligned.apk
           if [ -n "$SIGNING_KEYSTORE" ]; then
-            echo "$SIGNING_KEYSTORE" | base64 -d > out/key.jks
+            # tolerate spaces / line breaks picked up when the secret was pasted
+            KS=$(printf '%s' "$SIGNING_KEYSTORE" | tr -d ' \r\n\t')
+            echo "Signing key length: ${#KS} characters (expected 4548)"
+            if ! printf '%s' "$KS" | base64 -d > out/key.jks 2>/dev/null; then
+              echo "::error::The SIGNING_KEYSTORE secret isn't valid. Paste the whole SIGNING_KEYSTORE.txt contents again."
+              exit 1
+            fi
+            FP=$(keytool -list -v -keystore out/key.jks -storepass android -alias avy 2>/dev/null | grep -m1 'SHA256:' | tr -d ' :' | sed 's/SHA256//')
+            if [ "$FP" != "2DFBA87097DEFA6F46EA5673CEB70079B1CF2374F43110AD96B1C217FFA7AF6E" ]; then
+              echo "::error::SIGNING_KEYSTORE doesn't contain Avy's key (fingerprint $FP)."
+              exit 1
+            fi
             ALIAS=avy
             echo "Signing: official Avy key"
           else
