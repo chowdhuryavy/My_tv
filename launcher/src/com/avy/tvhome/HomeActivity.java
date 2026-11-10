@@ -104,6 +104,15 @@ public class HomeActivity extends Activity {
 
     // header pieces animated on entrance
     private View headerView, weatherCard, subsCard;
+    // big clock & weather header ("Big clock" style in Customize)
+    private View heroView, heroWeatherCard;
+    private TextView heroClock, heroAmPm, heroGreeting, heroDate, heroWIcon, heroTemp, heroDesc, heroForecast;
+    private ObjectAnimator heroFloat, heroGlow;
+    private int gearId;
+    // Customize settings
+    private static final String KEY_WALL = "wallpaper_on", KEY_WALL_BLUR = "wallpaper_blur", KEY_WALL_DIM = "wallpaper_dim";
+    private static final String KEY_HEADER = "header_style", KEY_24H = "clock_24h";
+    private static final String KEY_PARTICLES = "particles_on", KEY_SUBS_STRIP = "subs_strip_on";
     // account avatar (top right)
     private static final int REQ_ACCOUNT = 42;
     private static final String KEY_ACCOUNT = "account";
@@ -127,7 +136,8 @@ public class HomeActivity extends Activity {
     private final Runnable clockTick = new Runnable() {
         @Override public void run() {
             Date now = new Date();
-            final String hm = new SimpleDateFormat("h:mm", Locale.getDefault()).format(now);
+            final boolean h24 = prefs().getBoolean(KEY_24H, false);
+            final String hm = new SimpleDateFormat(h24 ? "HH:mm" : "h:mm", Locale.getDefault()).format(now);
             CharSequence shown = clockView.getText();
             if (shown.length() == 0) {
                 clockView.setText(hm);
@@ -140,12 +150,14 @@ public class HomeActivity extends Activity {
                             .setInterpolator(new OvershootInterpolator(1.6f)).start();
                 }).start();
             }
-            ampmView.setText(new SimpleDateFormat("a", Locale.getDefault()).format(now));
+            ampmView.setText(h24 ? "" : new SimpleDateFormat("a", Locale.getDefault()).format(now));
             dateView.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
+            updateHeroClock(hm, ampmView.getText().toString(), dateView.getText().toString());
             int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
             String hello = h < 5 ? "Good night" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : h < 22 ? "Good evening" : "Good night";
             String who = displayName();
             greeting.setText(who.isEmpty() ? hello : hello + ", " + who);
+            if (heroGreeting != null) heroGreeting.setText(greeting.getText());
             if (System.currentTimeMillis() - lastWeatherAt > WEATHER_EVERY_MS) loadWeather();
             // Auto theme: switch when the time of day moves into the next band
             if (prefs().getInt(KEY_THEME, 0) == Ui.AUTO && Ui.resolveTheme(Ui.AUTO) != appliedTheme) applyTheme();
@@ -159,9 +171,11 @@ public class HomeActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         ui = new Ui(this);
+        migrateThemeIndex();
         importConfig(getIntent());
         checkOpenExtra(getIntent());
         setContentView(buildUi());
+        applyLookSettings();
         applyTheme();
     }
 
@@ -472,6 +486,11 @@ public class HomeActivity extends Activity {
 
         page.addView(header);
         headerView = timeCol;
+        gearId = gear.getId();
+        View hero = buildHero();
+        LinearLayout.LayoutParams hlp0 = new LinearLayout.LayoutParams(-1, -2);
+        hlp0.topMargin = ui.px(6);
+        page.addView(hero, hlp0);
 
         // ---- subscriptions strip: one thin line of chips
         LinearLayout subsStrip = new LinearLayout(this);
@@ -551,7 +570,8 @@ public class HomeActivity extends Activity {
         int resolved = Ui.resolveTheme(t);
         appliedTheme = resolved;
         Ui.accent = Ui.accentFor(resolved);
-        Bitmap b = Ui.backdrop(resolved);
+        Bitmap b = wallpaperBitmap();
+        if (b == null) b = Ui.backdrop(resolved);
         Drawable old = backdrop.getDrawable();
         if (old instanceof TransitionDrawable) old = ((TransitionDrawable) old).getDrawable(1);
         if (old == null) {
@@ -594,10 +614,26 @@ public class HomeActivity extends Activity {
         iconFloat.setInterpolator(new AccelerateDecelerateInterpolator());
         iconFloat.start();
 
+        if (heroWIcon != null) {
+            heroFloat = ObjectAnimator.ofFloat(heroWIcon, View.TRANSLATION_Y, -ui.px(7), ui.px(7));
+            heroFloat.setDuration(3000);
+            heroFloat.setRepeatCount(ValueAnimator.INFINITE);
+            heroFloat.setRepeatMode(ValueAnimator.REVERSE);
+            heroFloat.setInterpolator(new AccelerateDecelerateInterpolator());
+            heroFloat.start();
+            heroGlow = ObjectAnimator.ofFloat(heroWIcon, View.ROTATION, -4f, 4f);
+            heroGlow.setDuration(4200);
+            heroGlow.setRepeatCount(ValueAnimator.INFINITE);
+            heroGlow.setRepeatMode(ValueAnimator.REVERSE);
+            heroGlow.setInterpolator(new AccelerateDecelerateInterpolator());
+            heroGlow.start();
+        }
+
         // light particles rise slowly from the bottom, twinkling, each on its own rhythm
         int h = getResources().getDisplayMetrics().heightPixels;
         java.util.Random rnd = new java.util.Random();
-        for (int i = 0; particles != null && i < particles.getChildCount(); i++) {
+        boolean particlesOn = prefs().getBoolean(KEY_PARTICLES, true);
+        for (int i = 0; particlesOn && particles != null && i < particles.getChildCount(); i++) {
             View dot = particles.getChildAt(i);
             long dur = 16_000 + rnd.nextInt(14_000);
             ObjectAnimator rise = ObjectAnimator.ofFloat(dot, View.TRANSLATION_Y, h + ui.px(20), -ui.px(30));
@@ -626,6 +662,8 @@ public class HomeActivity extends Activity {
     private void stopAmbient() {
         if (drift != null) drift.cancel();
         if (iconFloat != null) iconFloat.cancel();
+        if (heroFloat != null) heroFloat.cancel();
+        if (heroGlow != null) heroGlow.cancel();
         for (Animator a : pulses) a.cancel();
         for (Animator a : particleAnims) a.cancel();
         particleAnims.clear();
@@ -640,6 +678,10 @@ public class HomeActivity extends Activity {
         slideIn(gearButton, ui.px(40), 0, 110, dec);
         slideIn(avatar, ui.px(40), 0, 140, dec);
         slideIn(subsCard, 0, -ui.px(16), 200, dec);
+        if (heroView != null && heroView.getVisibility() == View.VISIBLE) {
+            slideIn(heroClock, -ui.px(40), 0, 40, dec);
+            slideIn(heroWeatherCard, ui.px(50), 0, 120, dec);
+        }
         int delay = 120;
         for (int i = 0; i < rowsBox.getChildCount(); i++) {
             View row = rowsBox.getChildAt(i);
@@ -676,6 +718,447 @@ public class HomeActivity extends Activity {
         panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(new OvershootInterpolator(1.2f)).start();
     }
 
+    // =================================================================== look: themes, wallpaper, header, customize
+
+    /** Auto used to be index 7; premium themes now sit there, so move stored "Auto" to the new slot once. */
+    private void migrateThemeIndex() {
+        if (prefs().getInt("theme_ver", 1) >= 2) return;
+        SharedPreferences.Editor ed = prefs().edit().putInt("theme_ver", 2);
+        if (prefs().getInt(KEY_THEME, 0) == Ui.OLD_AUTO) ed.putInt(KEY_THEME, Ui.AUTO);
+        ed.apply();
+    }
+
+    /** Big clock on the left, animated weather card on the right (shown in "Big clock" header style). */
+    private View buildHero() {
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.HORIZONTAL);
+        hero.setGravity(Gravity.CENTER_VERTICAL);
+        hero.setClipChildren(false);
+        hero.setPadding(ui.px(4), ui.px(2), 0, ui.px(4));
+
+        LinearLayout left = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout clockRow = new LinearLayout(this);
+        clockRow.setOrientation(LinearLayout.HORIZONTAL);
+        clockRow.setBaselineAligned(true);
+        heroClock = ui.text("", 84, Ui.WHITE, Ui.LIGHT);
+        heroClock.setShadowLayer(ui.px(18), 0, ui.px(2), 0x66000000);
+        heroAmPm = ui.text("", 22, Ui.SOFT, Ui.REGULAR);
+        heroAmPm.setPadding(ui.px(8), 0, 0, 0);
+        clockRow.addView(heroClock);
+        clockRow.addView(heroAmPm);
+        left.addView(clockRow);
+        heroGreeting = ui.text("", 22, Ui.WHITE, Ui.MEDIUM);
+        heroGreeting.setSingleLine(true);
+        heroGreeting.setEllipsize(TextUtils.TruncateAt.END);
+        addWithTop(left, heroGreeting, 2);
+        heroDate = ui.text("", 15, Ui.SOFT, Ui.REGULAR);
+        addWithTop(left, heroDate, 5);
+        hero.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setFocusable(true);
+        card.setClickable(true);
+        card.setBackground(ui.glassItem(28));
+        card.setPadding(ui.px(22), ui.px(14), ui.px(26), ui.px(14));
+        card.setOnClickListener(v -> showWeatherDetails());
+        card.setOnFocusChangeListener((v, has) -> v.animate().scaleX(has ? 1.05f : 1f).scaleY(has ? 1.05f : 1f)
+                .setInterpolator(new OvershootInterpolator(2f)).setDuration(240).start());
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        heroWIcon = ui.text("⛅", 50, Ui.WHITE, Ui.REGULAR);
+        top.addView(heroWIcon);
+        LinearLayout tcol = new LinearLayout(this);
+        tcol.setOrientation(LinearLayout.VERTICAL);
+        tcol.setPadding(ui.px(14), 0, 0, 0);
+        heroTemp = ui.text("--°", 44, Ui.WHITE, Ui.LIGHT);
+        tcol.addView(heroTemp);
+        heroDesc = ui.text("Loading weather…", 14, Ui.SOFT, Ui.REGULAR);
+        heroDesc.setSingleLine(true);
+        heroDesc.setMaxWidth(ui.px(300));
+        heroDesc.setEllipsize(TextUtils.TruncateAt.END);
+        addWithTop(tcol, heroDesc, 2);
+        top.addView(tcol);
+        card.addView(top);
+        heroForecast = ui.text("", 13, Ui.SOFT, Ui.REGULAR);
+        addWithTop(card, heroForecast, 10);
+        hero.addView(card, new LinearLayout.LayoutParams(-2, -2));
+
+        heroView = hero;
+        heroWeatherCard = card;
+        return hero;
+    }
+
+    private void updateHeroClock(final String hm, String ampm, String date) {
+        if (heroClock == null) return;
+        CharSequence shown = heroClock.getText();
+        if (shown.length() == 0 || heroView.getVisibility() != View.VISIBLE) {
+            heroClock.setText(hm);
+        } else if (!hm.contentEquals(shown)) {
+            heroClock.animate().translationY(-ui.px(16)).alpha(0f).setDuration(180).withEndAction(() -> {
+                heroClock.setText(hm);
+                heroClock.setTranslationY(ui.px(18));
+                heroClock.animate().translationY(0).alpha(1f).setDuration(320)
+                        .setInterpolator(new OvershootInterpolator(1.4f)).start();
+            }).start();
+        }
+        heroAmPm.setText(ampm);
+        heroDate.setText(date);
+    }
+
+    private void updateHeroWeather() {
+        if (heroTemp == null) return;
+        heroWIcon.setText(weatherIcon.getText());
+        heroTemp.setText(weatherTemp.getText());
+        heroDesc.setText(weatherDesc.getText());
+        heroForecast.setText(forecastView.getText());
+        heroForecast.setVisibility(forecastView.getText().length() == 0 ? View.GONE : View.VISIBLE);
+    }
+
+    /** Header style, floating lights and subscriptions bar from Customize. */
+    private void applyLookSettings() {
+        boolean big = prefs().getInt(KEY_HEADER, 0) == 1;
+        if (heroView != null) heroView.setVisibility(big ? View.VISIBLE : View.GONE);
+        if (headerView != null) headerView.setVisibility(big ? View.INVISIBLE : View.VISIBLE);
+        if (weatherCard != null) weatherCard.setVisibility(big ? View.GONE : View.VISIBLE);
+        if (particles != null) particles.setVisibility(prefs().getBoolean(KEY_PARTICLES, true) ? View.VISIBLE : View.GONE);
+        if (subsCard != null) subsCard.setVisibility(prefs().getBoolean(KEY_SUBS_STRIP, true) ? View.VISIBLE : View.GONE);
+        updateHeroWeather();
+    }
+
+    private File wallpaperFile() { return new File(getFilesDir(), "wallpaper.jpg"); }
+
+    /** The photo wallpaper with blur + dim applied, or null to use the theme backdrop. */
+    private Bitmap wallpaperBitmap() {
+        if (!prefs().getBoolean(KEY_WALL, false) || !wallpaperFile().isFile()) return null;
+        try {
+            Bitmap src = BitmapFactory.decodeFile(wallpaperFile().getAbsolutePath());
+            if (src == null) return null;
+            Bitmap out = Ui.wallpaper(src, prefs().getInt(KEY_WALL_BLUR, 1), prefs().getInt(KEY_WALL_DIM, 1));
+            src.recycle();
+            return out;
+        } catch (Throwable t) { // includes OutOfMemoryError on very large photos
+            android.util.Log.w("AvyLook", "wallpaper failed", t);
+            return null;
+        }
+    }
+
+    /** Settings that change in place: each press moves to the next value. */
+    private interface Cycle { String label(); void next(); }
+
+    private void showCustomize() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Customize", 24, Ui.WHITE, Ui.MEDIUM));
+        addWithTop(panel, ui.text("Changes apply right away.", 13, Ui.MUTED, Ui.REGULAR), 4);
+        final Dialog d = dialog(panel);
+        final String[] blur = {"None", "Soft", "Strong"}, dim = {"Light", "Medium", "Dark"};
+        Object[][] items = {
+            {(Runnable) this::showThemePicker, "🎨   Theme:  " + Ui.themeName(prefs().getInt(KEY_THEME, 0))},
+            {(Runnable) this::showWallpaperMenu, "🖼   Wallpaper:  " + (prefs().getBoolean(KEY_WALL, false) && wallpaperFile().isFile() ? "Your photo" : "Theme")},
+            {new Cycle() {
+                public String label() { return "🕒   Header:  " + (prefs().getInt(KEY_HEADER, 0) == 1 ? "Big clock" : "Slim"); }
+                public void next() { prefs().edit().putInt(KEY_HEADER, prefs().getInt(KEY_HEADER, 0) == 1 ? 0 : 1).apply(); applyLookSettings(); restartClock(); }
+            }},
+            {new Cycle() {
+                public String label() { return "⌚   Clock:  " + (prefs().getBoolean(KEY_24H, false) ? "24-hour" : "12-hour"); }
+                public void next() { prefs().edit().putBoolean(KEY_24H, !prefs().getBoolean(KEY_24H, false)).apply(); restartClock(); }
+            }},
+            {new Cycle() {
+                public String label() { return "◐   Photo blur:  " + blur[prefs().getInt(KEY_WALL_BLUR, 1)]; }
+                public void next() { prefs().edit().putInt(KEY_WALL_BLUR, (prefs().getInt(KEY_WALL_BLUR, 1) + 1) % 3).apply(); if (prefs().getBoolean(KEY_WALL, false)) applyTheme(); }
+            }},
+            {new Cycle() {
+                public String label() { return "◑   Photo dim:  " + dim[prefs().getInt(KEY_WALL_DIM, 1)]; }
+                public void next() { prefs().edit().putInt(KEY_WALL_DIM, (prefs().getInt(KEY_WALL_DIM, 1) + 1) % 3).apply(); if (prefs().getBoolean(KEY_WALL, false)) applyTheme(); }
+            }},
+            {new Cycle() {
+                public String label() { return "✨   Floating lights:  " + (prefs().getBoolean(KEY_PARTICLES, true) ? "On" : "Off"); }
+                public void next() { prefs().edit().putBoolean(KEY_PARTICLES, !prefs().getBoolean(KEY_PARTICLES, true)).apply(); applyLookSettings(); startAmbient(); }
+            }},
+            {new Cycle() {
+                public String label() { return "💳   Subscriptions bar:  " + (prefs().getBoolean(KEY_SUBS_STRIP, true) ? "On" : "Off"); }
+                public void next() { prefs().edit().putBoolean(KEY_SUBS_STRIP, !prefs().getBoolean(KEY_SUBS_STRIP, true)).apply(); applyLookSettings(); }
+            }},
+        };
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout row = null;
+        View first = null;
+        for (int i = 0; i < items.length; i++) {
+            if (i % 2 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-2, -2);
+                rlp.topMargin = ui.px(10);
+                grid.addView(row, rlp);
+            }
+            final Object action = items[i][0];
+            final TextView b = ui.button(action instanceof Cycle ? ((Cycle) action).label() : (String) items[i][1], false);
+            b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            b.setSingleLine(true);
+            b.setEllipsize(TextUtils.TruncateAt.END);
+            b.setPadding(ui.px(18), ui.px(13), ui.px(18), ui.px(13));
+            b.setOnClickListener(v -> {
+                if (action instanceof Cycle) {
+                    ((Cycle) action).next();
+                    b.setText(((Cycle) action).label());
+                    b.animate().scaleX(0.94f).scaleY(0.94f).setDuration(80)
+                            .withEndAction(() -> b.animate().scaleX(1f).scaleY(1f).setDuration(200)
+                                    .setInterpolator(new OvershootInterpolator(3f)).start()).start();
+                } else {
+                    d.dismiss();
+                    ((Runnable) action).run();
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ui.px(330), -2);
+            lp.rightMargin = ui.px(10);
+            row.addView(b, lp);
+            if (first == null) first = b;
+        }
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-2, -2);
+        glp.topMargin = ui.px(6);
+        panel.addView(grid, glp);
+        TextView close = ui.button("Done", true);
+        close.setOnClickListener(v -> d.dismiss());
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-2, -2);
+        clp.topMargin = ui.px(16);
+        panel.addView(close, clp);
+        d.show();
+        first.requestFocus();
+    }
+
+    private void restartClock() {
+        if (clockView != null) clockView.setText("");
+        if (heroClock != null) heroClock.setText("");
+        handler.removeCallbacks(clockTick);
+        handler.post(clockTick);
+    }
+
+    /** Grid of theme cards with a colour preview; OK picks one (and switches the photo wallpaper off). */
+    private void showThemePicker() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Choose a theme", 24, Ui.WHITE, Ui.MEDIUM));
+        final Dialog d = dialog(panel);
+        final int current = prefs().getInt(KEY_THEME, 0);
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout row = null;
+        View focus = null;
+        int count = Ui.THEMES.length + 1; // + Auto
+        for (int i = 0; i < count; i++) {
+            if (i % 6 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-2, -2);
+                rlp.topMargin = ui.px(12);
+                grid.addView(row, rlp);
+            }
+            final int theme = i == Ui.THEMES.length ? Ui.AUTO : i;
+            LinearLayout cell = new LinearLayout(this);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER_HORIZONTAL);
+            cell.setFocusable(true);
+            cell.setClickable(true);
+            cell.setBackground(ui.glassItem(18));
+            cell.setPadding(ui.px(8), ui.px(8), ui.px(8), ui.px(8));
+            View sw = new View(this);
+            int[] p = Ui.swatch(Ui.resolveTheme(theme));
+            GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    theme == Ui.AUTO ? new int[]{0xFFE8A0A8, 0xFF00B4D8, 0xFFFF7A59, 0xFF1B2A6B}
+                            : new int[]{p[1], p[2], p[3], p[0]});
+            g.setCornerRadius(ui.px(12));
+            g.setStroke(ui.px(1), 0x40FFFFFF);
+            sw.setBackground(g);
+            cell.addView(sw, new LinearLayout.LayoutParams(ui.px(96), ui.px(56)));
+            TextView name = ui.text((theme == current ? "✓ " : "") + Ui.themeName(theme), 13, Ui.WHITE, Ui.MEDIUM);
+            name.setGravity(Gravity.CENTER);
+            addWithTop(cell, name, 6);
+            cell.setOnFocusChangeListener((v, has) -> v.animate().scaleX(has ? 1.08f : 1f).scaleY(has ? 1.08f : 1f)
+                    .setInterpolator(new OvershootInterpolator(2f)).setDuration(200).start());
+            cell.setOnClickListener(v -> {
+                boolean hadPhoto = prefs().getBoolean(KEY_WALL, false);
+                prefs().edit().putInt(KEY_THEME, theme).putBoolean(KEY_WALL, false).apply();
+                d.dismiss();
+                applyTheme();
+                if (hadPhoto) Toast.makeText(this, "Photo wallpaper off. Turn it back on in Customize → Wallpaper", Toast.LENGTH_LONG).show();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = ui.px(10);
+            row.addView(cell, lp);
+            if (theme == current || focus == null) focus = cell;
+        }
+        panel.addView(grid);
+        d.show();
+        focus.requestFocus();
+    }
+
+    private static final int REQ_STORAGE_PERM = 44;
+
+    private void showWallpaperMenu() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Wallpaper", 22, Ui.WHITE, Ui.MEDIUM));
+        addWithTop(panel, ui.text("Send a photo to the TV (e.g. with \"Send files to TV\") or use a web link.", 13, Ui.SOFT, Ui.REGULAR), 6);
+        final Dialog d = dialog(panel);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ui.px(420), -2);
+        llp.topMargin = ui.px(10);
+        panel.addView(list, llp);
+        View first = menuButton(list, "📁   Choose a photo on this TV", this::pickPhotoFromTv, d);
+        menuButton(list, "🔗   Use a photo from a web link", this::pickPhotoFromLink, d);
+        if (wallpaperFile().isFile()) {
+            boolean on = prefs().getBoolean(KEY_WALL, false);
+            menuButton(list, on ? "🎨   Use theme colours instead" : "🖼   Use my last photo again", () -> {
+                prefs().edit().putBoolean(KEY_WALL, !on).apply();
+                applyTheme();
+            }, d);
+        }
+        menuButton(list, "✕   Close", null, d);
+        d.show();
+        first.requestFocus();
+    }
+
+    private void pickPhotoFromTv() {
+        if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE_PERM);
+            return; // continues in onRequestPermissionsResult
+        }
+        final List<File> found = new ArrayList<>();
+        File root = android.os.Environment.getExternalStorageDirectory();
+        findImages(root, 0, found);
+        Collections.sort(found, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        if (found.isEmpty()) {
+            Toast.makeText(this, "No photos found. Send a .jpg or .png to the TV's Download folder first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Choose a photo", 22, Ui.WHITE, Ui.MEDIUM));
+        final Dialog d = dialog(panel);
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        sv.addView(list);
+        View first = null;
+        for (int i = 0; i < found.size() && i < 80; i++) {
+            final File f = found.get(i);
+            String where = f.getParentFile() == null ? "" : "  ·  " + f.getParentFile().getName();
+            View b = menuButton(list, "🖼   " + f.getName() + where, () -> setWallpaperFrom(() -> readAll(new java.io.FileInputStream(f))), d);
+            if (first == null) first = b;
+        }
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ui.px(560), Math.min(ui.px(360), ui.px(56) * found.size()));
+        slp.topMargin = ui.px(8);
+        panel.addView(sv, slp);
+        d.show();
+        if (first != null) first.requestFocus();
+    }
+
+    private void findImages(File dir, int depth, List<File> out) {
+        if (dir == null || depth > 4 || out.size() >= 200) return;
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            String n = f.getName();
+            if (n.startsWith(".")) continue;
+            if (f.isDirectory()) {
+                if (depth == 0 && n.equals("Android")) continue;
+                findImages(f, depth + 1, out);
+            } else {
+                String l = n.toLowerCase(Locale.ROOT);
+                if ((l.endsWith(".jpg") || l.endsWith(".jpeg") || l.endsWith(".png") || l.endsWith(".webp")) && f.length() > 10_000) out.add(f);
+            }
+        }
+    }
+
+    private void pickPhotoFromLink() {
+        LinearLayout panel = panel();
+        panel.addView(ui.text("Photo from a web link", 22, Ui.WHITE, Ui.MEDIUM));
+        addWithTop(panel, ui.text("Tip: copy an image link on your phone and paste it with the Google TV app's keyboard.", 13, Ui.SOFT, Ui.REGULAR), 6);
+        final EditText field = new EditText(this);
+        field.setHint("https://…/photo.jpg");
+        field.setSingleLine(true);
+        field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        field.setTextColor(Ui.WHITE);
+        field.setHintTextColor(0x80FFFFFF);
+        field.setTextSize(16);
+        field.setPadding(ui.px(16), ui.px(10), ui.px(16), ui.px(10));
+        field.setBackground(ui.glassItem(14));
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(ui.px(560), -2);
+        flp.topMargin = ui.px(14);
+        panel.addView(field, flp);
+        final Dialog d = dialog(panel);
+        LinearLayout actions = new LinearLayout(this);
+        TextView ok = ui.button("Use photo", true);
+        ok.setOnClickListener(v -> {
+            final String url = field.getText().toString().trim();
+            if (!url.startsWith("http")) { Toast.makeText(this, "Enter a link starting with https://", Toast.LENGTH_LONG).show(); return; }
+            d.dismiss();
+            setWallpaperFrom(() -> {
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new URL(url).openConnection();
+                c.setConnectTimeout(15_000);
+                c.setReadTimeout(30_000);
+                c.setInstanceFollowRedirects(true);
+                c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AvyTVHome");
+                try { return readAll(c.getInputStream()); } finally { c.disconnect(); }
+            });
+        });
+        actions.addView(ok, buttonLp());
+        TextView cancel = ui.button("Cancel", false);
+        cancel.setOnClickListener(v -> d.dismiss());
+        actions.addView(cancel, buttonLp());
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, -2);
+        alp.topMargin = ui.px(18);
+        panel.addView(actions, alp);
+        d.show();
+        field.requestFocus();
+    }
+
+    private interface Bytes { byte[] get() throws Exception; }
+
+    private static byte[] readAll(java.io.InputStream in) throws java.io.IOException {
+        try (java.io.InputStream s = in) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = s.read(buf)) > 0) {
+                out.write(buf, 0, n);
+                if (out.size() > 25 * 1024 * 1024) throw new java.io.IOException("photo is larger than 25 MB");
+            }
+            return out.toByteArray();
+        }
+    }
+
+    /** Decodes the photo (scaled down to at most 1920 px), saves it, and shows it as the wallpaper. */
+    private void setWallpaperFrom(final Bytes source) {
+        Toast.makeText(this, "Setting wallpaper…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                byte[] data = source.get();
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inJustDecodeBounds = true;
+                BitmapFactory.decodeByteArray(data, 0, data.length, o);
+                if (o.outWidth <= 0) throw new Exception("that file isn't a photo");
+                int sample = 1;
+                while (Math.max(o.outWidth, o.outHeight) / sample > 1920) sample *= 2;
+                o = new BitmapFactory.Options();
+                o.inSampleSize = sample;
+                Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length, o);
+                if (b == null) throw new Exception("couldn't read the photo");
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(wallpaperFile())) {
+                    b.compress(Bitmap.CompressFormat.JPEG, 92, out);
+                }
+                b.recycle();
+                prefs().edit().putBoolean(KEY_WALL, true).apply();
+                runOnUiThread(() -> { applyTheme(); Toast.makeText(this, "Wallpaper set", Toast.LENGTH_SHORT).show(); });
+            } catch (Throwable t) {
+                final String msg = t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
+                runOnUiThread(() -> Toast.makeText(this, "Couldn't set wallpaper: " + msg, Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
     // =================================================================== quick settings
 
     private void showQuickSettings() {
@@ -690,10 +1173,7 @@ public class HomeActivity extends Activity {
             {"⎆   Inputs (HDMI)", new Intent("com.tcl.suspension.action.main").setPackage("com.tcl.suspension").putExtra("openInput", "true")},
             {"🌙   Screen saver", new Intent("com.google.android.tv.settings.ambient")},
             {"🎮   Remote buttons", (Runnable) this::showRemoteButtons},
-            {"🎨   Change theme", (Runnable) () -> {
-                nextTheme();
-                applyTheme();
-            }},
+            {"🎨   Customize look", (Runnable) this::showCustomize},
             {"⚙   All settings", (Runnable) this::openSettingsWithAccounts},
             {"🏠   Make Avy my Home", (Runnable) this::makeDefaultHome},
         };
@@ -1262,6 +1742,11 @@ public class HomeActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int req, String[] perms, int[] res) {
         super.onRequestPermissionsResult(req, perms, res);
+        if (req == REQ_STORAGE_PERM) {
+            if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) pickPhotoFromTv();
+            else Toast.makeText(this, "Allow storage access to choose a photo on the TV", Toast.LENGTH_LONG).show();
+            return;
+        }
         if (req == REQ_ACCOUNTS_PERM) {
             readGoogleAccount();
             refreshAvatar();
@@ -1616,7 +2101,7 @@ public class HomeActivity extends Activity {
                 View tile = appTile(ri);
                 row.addView(tile);
                 View card = ((ViewGroup) tile).getChildAt(0);
-                if (topRow) card.setNextFocusUpId(addButtonId); // Up from top row -> + Add
+                if (topRow) card.setNextFocusUpId(prefs().getBoolean(KEY_SUBS_STRIP, true) ? addButtonId : gearId); // Up from top row -> + Add
                 if (first == null) first = card;
                 if (ri.activityInfo.packageName.equals(focusPkg)) restore = card;
             }
@@ -1630,10 +2115,7 @@ public class HomeActivity extends Activity {
         sys.addView(actionTile("▦", "All apps", new Intent(Settings.ACTION_APPLICATION_SETTINGS)));
         View themeBox = actionTile("🎨", "Theme", null);
         themeTile = (TextView) ((ViewGroup) themeBox).getChildAt(1);
-        ((ViewGroup) themeBox).getChildAt(0).setOnClickListener(v -> {
-            nextTheme();
-            applyTheme();
-        });
+        ((ViewGroup) themeBox).getChildAt(0).setOnClickListener(v -> showCustomize());
         sys.addView(themeBox);
         View arrangeBox = actionTile("⇄", "Arrange apps", null);
         cardOf(arrangeBox).setOnClickListener(v -> startArrange());
@@ -2465,10 +2947,11 @@ public class HomeActivity extends Activity {
                     weatherDesc.setText(desc);
                     weatherExtra.setText(extra);
                     forecastView.setText(forecast);
+                    updateHeroWeather();
                 });
             } catch (Exception e) {
                 lastWeatherAt = System.currentTimeMillis() - WEATHER_EVERY_MS + 2 * 60 * 1000L; // retry in 2 min
-                runOnUiThread(() -> weatherDesc.setText("Weather unavailable"));
+                runOnUiThread(() -> { weatherDesc.setText("Weather unavailable"); updateHeroWeather(); });
             }
         }).start();
     }

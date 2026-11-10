@@ -30,7 +30,10 @@ final class Ui {
     static final int RED = 0xFFFF5C7A;
 
     /** Theme names; the extra last slot (index THEMES.length) is "Auto" (changes with the time of day). */
-    static final String[] THEMES = {"Aurora", "Ocean", "Sunset", "Forest", "Midnight", "Neon", "Rose"};
+    static final String[] THEMES = {"Aurora", "Ocean", "Sunset", "Forest", "Midnight", "Neon", "Rose",
+            "Gold", "Cinema", "Royal", "Arctic"};
+    /** Theme index for "Auto" before the premium themes were added (stored values are migrated). */
+    static final int OLD_AUTO = 7;
     static final int AUTO = THEMES.length;
     // {base, colour A, colour B, colour C}
     private static final int[][] PALETTES = {
@@ -41,11 +44,19 @@ final class Ui {
         {0xFF03060F, 0xFF1B2A6B, 0xFF3A1F6E, 0xFF0E5A7A},   // Midnight (+ stars)
         {0xFF07020F, 0xFFFF2E93, 0xFF00E5FF, 0xFF7C4DFF},   // Neon
         {0xFF1A0E14, 0xFFE8A0A8, 0xFFB76E79, 0xFF6D3B5A},   // Rose
+        {0xFF0E0A04, 0xFFB8860B, 0xFFFFD166, 0xFF7A4E12},   // Gold (+ gold dust)
+        {0xFF050505, 0xFF8B0A1A, 0xFF3A0610, 0xFF2B2B2B},   // Cinema
+        {0xFF0A0620, 0xFF3D2C8D, 0xFF916BBF, 0xFFC9A227},   // Royal
+        {0xFF06121C, 0xFF5AA9E6, 0xFFBFE6FF, 0xFF2E5C8A},   // Arctic (+ snow)
     };
     /** Accent per theme: focus glow, row titles. */
     private static final int[] ACCENTS = {
         0xFFA996FF, 0xFF4DD0E1, 0xFFFF9E80, 0xFF8BE0A4, 0xFF8AB4FF, 0xFFFF4FD8, 0xFFFFB3C1,
+        0xFFFFD166, 0xFFFF4D5E, 0xFFD4B5FF, 0xFFB3E5FF,
     };
+
+    /** Small colour swatch for the theme picker (base + the three mesh colours). */
+    static int[] swatch(int theme) { return PALETTES[Math.floorMod(theme, PALETTES.length)].clone(); }
 
     /** Current accent colour (set when a theme is applied). */
     static int accent = 0xFFA996FF;
@@ -244,14 +255,23 @@ final class Ui {
         paint.setShader(null);
 
         java.util.Random rnd = new java.util.Random(42 + idx);
-        // 4. starfield for Midnight
-        if (idx == 4) {
-            for (int i = 0; i < 260; i++) {
-                float sx = rnd.nextFloat() * w, sy = rnd.nextFloat() * h * 0.8f;
-                float sr = rnd.nextFloat() < 0.08f ? 1.3f : 0.6f;
-                paint.setColor(((int) (90 + rnd.nextInt(165)) << 24) | 0xFFFFFF);
+        // 4. starfield for Midnight, gold dust for Gold, snow for Arctic
+        if (idx == 4 || idx == 7 || idx == 10) {
+            int tint = idx == 7 ? 0xFFD98A : 0xFFFFFF;
+            int count = idx == 4 ? 260 : idx == 7 ? 180 : 220;
+            for (int i = 0; i < count; i++) {
+                float sx = rnd.nextFloat() * w, sy = rnd.nextFloat() * h * (idx == 10 ? 1f : 0.8f);
+                float sr = rnd.nextFloat() < 0.08f ? 1.3f : idx == 10 ? 0.9f : 0.6f;
+                paint.setColor(((int) (90 + rnd.nextInt(165)) << 24) | tint);
                 cv.drawCircle(sx, sy, sr, paint);
             }
+        }
+        // spotlight for Cinema: a soft cone of light from the top
+        if (idx == 8) {
+            paint.setShader(new RadialGradient(w * 0.5f, -h * 0.1f, w * 0.55f,
+                    new int[]{0x33FFE7C2, 0x0DFFE7C2, 0x00FFE7C2}, new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+            cv.drawRect(0, 0, w, h, paint);
+            paint.setShader(null);
         }
 
         // 5. fine film grain (breaks up banding on big TVs)
@@ -271,6 +291,43 @@ final class Ui {
         paint.setShader(new LinearGradient(0, h * 0.55f, 0, h, 0x00000000, 0x66000000, Shader.TileMode.CLAMP));
         cv.drawRect(0, 0, w, h, paint);
         return b;
+    }
+
+    /**
+     * Photo wallpaper: scaled to fill 1280x720, optional blur (shrink then enlarge with filtering),
+     * a dim layer so glass cards and text stay readable, plus the same vignette as the themes.
+     * blur: 0 none, 1 soft, 2 strong.  dim: 0 light, 1 medium, 2 dark.
+     */
+    static Bitmap wallpaper(Bitmap src, int blur, int dim) {
+        int w = 1280, h = 720;
+        Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas cv = new Canvas(out);
+        Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG | Paint.ANTI_ALIAS_FLAG);
+        // centre-crop
+        float scale = Math.max(w / (float) src.getWidth(), h / (float) src.getHeight());
+        float dw = src.getWidth() * scale, dh = src.getHeight() * scale;
+        android.graphics.RectF dst = new android.graphics.RectF((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f);
+        if (blur > 0) {
+            int f = blur == 1 ? 10 : 22;
+            Bitmap tmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            new Canvas(tmp).drawBitmap(src, null, dst, paint);
+            // two shrink/enlarge passes give a smooth, cheap blur
+            Bitmap small = Bitmap.createScaledBitmap(tmp, Math.max(1, w / f), Math.max(1, h / f), true);
+            Bitmap mid = Bitmap.createScaledBitmap(small, Math.max(1, w / (f / 2)), Math.max(1, h / (f / 2)), true);
+            cv.drawBitmap(mid, null, new android.graphics.Rect(0, 0, w, h), paint);
+            tmp.recycle(); small.recycle(); mid.recycle();
+        } else {
+            cv.drawBitmap(src, null, dst, paint);
+        }
+        paint.setShader(null);
+        paint.setColor(dim == 0 ? 0x33000000 : dim == 1 ? 0x66000000 : 0x99000000);
+        cv.drawRect(0, 0, w, h, paint);
+        paint.setShader(new RadialGradient(w / 2f, h * 0.42f, w * 0.75f,
+                new int[]{0x00000000, 0x00000000, 0x80000000}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+        cv.drawRect(0, 0, w, h, paint);
+        paint.setShader(new LinearGradient(0, h * 0.55f, 0, h, 0x00000000, 0x80000000, Shader.TileMode.CLAMP));
+        cv.drawRect(0, 0, w, h, paint);
+        return out;
     }
 
     private static int lighten(int c, float f) {
